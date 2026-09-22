@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>DartTracker Fernbedienung</title>
+  <link rel="manifest" href="/remote/manifest.json" />
+  <link rel="icon" href="/icons/dart-icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/icons/dart-icon.svg" />
+  <meta name="theme-color" content="#121316" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="DartTracker" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="/css/style.css" />
+  <style>
+    body { padding-bottom: env(safe-area-inset-bottom); }
+    .remote-wrap { padding: 18px 16px; max-width: 480px; margin: 0 auto; }
+    .remote-header {
+      text-align: center; font-family: var(--font-display); font-size: 0.85rem; font-weight: 700;
+      letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); padding: 8px 0 18px;
+    }
+    .turn-banner { text-align: center; font-size: 1rem; font-weight: 700; margin: 0 0 4px; }
+    .turn-banner .who { color: var(--text); }
+    .turn-banner .sub { color: var(--text-dim); font-weight: 500; }
+    .remote-score { font-family: var(--font-display); text-align: center; font-size: 4.4rem; font-weight: 700; line-height: 1; margin: 6px 0; }
+    .remote-dart-slots { display: flex; gap: 10px; justify-content: center; margin: 10px 0 14px; }
+    .remote-dart-slots .dart-slot { width: 66px; height: 48px; font-size: 1.05rem; }
+    .remote-checkout {
+      text-align: center; border-radius: var(--radius-sm); padding: 12px; min-height: 1.3em; margin-bottom: 18px;
+    }
+    .remote-checkout:not(:empty) { background: var(--gold-dim); border: 1px solid #6b5220; }
+    .remote-checkout .co-label { display: block; font-size: 0.68rem; letter-spacing: 0.08em; color: var(--text-dim); font-weight: 700; }
+    .remote-checkout .co-value { font-family: var(--font-display); color: var(--gold); font-size: 1.15rem; font-weight: 700; }
+    .remote-numpad { display: grid; grid-template-columns: repeat(5, 1fr); gap: 7px; }
+    .remote-numpad button {
+      padding: 20px 0; font-size: 1.2rem; font-family: var(--font-display); font-weight: 600;
+      background: var(--bg-card-2); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text);
+    }
+    .remote-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 10px; }
+    .remote-actions button { padding: 17px 0; font-size: 0.92rem; justify-content: center; }
+    .remote-undo { margin-top: 10px; justify-content: center; }
+  </style>
+</head>
+<body>
+  <div class="remote-wrap">
+    <div class="remote-header">DartTracker Fernbedienung</div>
+
+    <div id="remote-idle" class="card empty-state" style="margin-top:30px;">
+      Kein Spiel aktiv.<br/>Bitte auf dem Desktop ein Spiel oder Training starten.
+    </div>
+
+    <div id="remote-active" hidden>
+      <div class="turn-banner" id="remote-turn-text"></div>
+      <div class="remote-score" id="remote-score">0</div>
+      <div class="remote-dart-slots" id="remote-dart-slots"></div>
+      <div class="remote-checkout" id="remote-checkout"></div>
+
+      <div class="segmented input-mode-toggle" id="remote-input-mode" style="margin:0 auto 14px; width:100%;">
+        <button data-mode="numpad" class="active" style="flex:1;">Zahlenfeld</button>
+        <button data-mode="board" style="flex:1;">Dartscheibe</button>
+      </div>
+
+      <div id="remote-input-numpad">
+        <div class="multiplier-row">
+          <button data-mult="1" class="active">Single</button>
+          <button data-mult="2">Double</button>
+          <button data-mult="3">Treble</button>
+        </div>
+        <div class="remote-numpad" id="remote-numpad"></div>
+      </div>
+
+      <div class="dartboard-wrap" id="remote-input-board" hidden></div>
+
+      <div class="remote-actions">
+        <button class="btn" id="remote-bull25">25</button>
+        <button class="btn" id="remote-bull50">Bull (50)</button>
+        <button class="btn" id="remote-miss">Fehler</button>
+      </div>
+      <button class="btn btn-block remote-undo" id="remote-undo">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10h9a5 5 0 0 1 0 10h-2"/><path d="M8 5 3 10l5 5"/></svg>
+        Rückgängig
+      </button>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/dartboard.js"></script>
+  <script src="/remote/remote.js"></script>
+</body>
+</html>

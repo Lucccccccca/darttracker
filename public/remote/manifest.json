@@ -1,0 +1,12 @@
+{
+  "name": "DartTracker Fernbedienung",
+  "short_name": "DartTracker",
+  "start_url": "/remote/",
+  "scope": "/remote/",
+  "display": "standalone",
+  "background_color": "#0f1115",
+  "theme_color": "#ff4d4d",
+  "icons": [
+    { "src": "/icons/dart-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
