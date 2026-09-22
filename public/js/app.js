@@ -22,8 +22,15 @@ let practiceMultiplier = 1;
 function showView(name) {
   currentView = name;
   document.querySelectorAll('main.view').forEach((el) => {
-    el.hidden = el.id !== `view-${name}`;
+    const show = el.id === `view-${name}`;
+    if (show && el.hidden) {
+      el.classList.remove('view-enter');
+      void el.offsetWidth;
+      el.classList.add('view-enter');
+    }
+    el.hidden = !show;
   });
+  if (name !== 'game' && document.body.classList.contains('tv-mode')) exitTvMode();
   document.getElementById('btn-home').hidden = name === 'home';
   if (name !== 'game') {
     document.getElementById('overlay-leg').hidden = true;
@@ -320,9 +327,31 @@ document.getElementById('btn-finish-practice').addEventListener('click', () => s
 // Game (X01) rendering
 // ---------------------------------------------------------------------------
 
+// Snapshot of the last rendered game, so a re-render knows what actually changed and can
+// animate only that (the scoreboard is rebuilt from scratch on every state update).
+let prevGameSnapshot = null;
+
+function snapshotGame(g) {
+  return {
+    id: g.id,
+    status: g.status,
+    activePlayerIndex: g.activePlayerIndex,
+    legNumber: g.legNumber,
+    players: g.players.map((p) => ({
+      score: p.currentScore,
+      darts: p.turnDarts.length,
+      turns: p.turnLog.length,
+      lastTurn: p.turnLog[p.turnLog.length - 1] || null,
+    })),
+  };
+}
+
 function renderGame() {
   const g = latestState.game;
   if (!g || g.mode !== 'x01') return;
+
+  const prev = prevGameSnapshot && prevGameSnapshot.id === g.id ? prevGameSnapshot : null;
+  const sameLeg = prev && prev.legNumber === g.legNumber;
 
   document.getElementById('game-meta-leg').textContent =
     `Leg ${g.legNumber}${g.setsToWin > 1 ? ` · Set ${g.setNumber}` : ''}`;
@@ -333,8 +362,16 @@ function renderGame() {
   board.innerHTML = '';
   g.players.forEach((p, idx) => {
     const isActive = idx === g.activePlayerIndex;
+    const pp = prev ? prev.players[idx] : null;
+    const scoreChanged = !!pp && sameLeg && pp.score !== p.currentScore;
+    const dartAdded = !!pp && p.turnDarts.length > pp.darts;
+    const newTurn = !!pp && p.turnLog.length > pp.turns ? p.turnLog[p.turnLog.length - 1] : null;
+    const busted = !!newTurn && newTurn.bust;
+    const becameActive = !!prev && isActive && prev.activePlayerIndex !== idx;
+    const scored180 = !!newTurn && !newTurn.bust && !newTurn.checkout && newTurn.scoreBefore - newTurn.scoreAfter === 180;
+
     const card = document.createElement('div');
-    card.className = 'player-card' + (isActive ? ' active' : '');
+    card.className = 'player-card' + (isActive ? ' active' : '') + (busted ? ' bust-shake' : '') + (becameActive ? ' active-in' : '');
 
     const legDots = Array.from({ length: g.legsToWin }, (_, i) => i < p.legsWon ? '●' : '○').join(' ');
 
@@ -344,24 +381,29 @@ function renderGame() {
         <span class="name">${escapeHtml(p.name)}</span>
         <span class="avg">Ø ${p.average.toFixed(1)}</span>
       </div>
-      <div class="score">${p.currentScore}</div>
+      <div class="score${scoreChanged ? ' score-pop' : ''}">${p.currentScore}</div>
       <div class="legs-sets">
         <span class="badge">Legs ${legDots}</span>
         ${g.setsToWin > 1 ? `<span class="badge">Sets ${p.setsWon}/${g.setsToWin}</span>` : ''}
       </div>
-      <div class="dart-slots">${renderDartSlots(p.turnDarts)}</div>
+      <div class="dart-slots">${renderDartSlots(p.turnDarts, dartAdded)}</div>
       <div class="checkout-suggestion">${isActive ? formatCheckout(p.checkoutSuggestion) : ''}</div>
     `;
     board.appendChild(card);
+
+    if (scored180) showBigFlash('180!', 'gold');
+    else if (busted) showBigFlash('Bust', 'red');
   });
 
   const log = document.getElementById('turn-log');
-  log.innerHTML = g.players.map((p) => {
-    const entries = p.turnLog.slice(-6).reverse().map((t) => {
+  log.innerHTML = g.players.map((p, idx) => {
+    const pp = prev ? prev.players[idx] : null;
+    const entries = p.turnLog.slice(-6).reverse().map((t, i) => {
       const cls = t.bust ? 'bust' : t.checkout ? 'checkout' : '';
+      const isNew = i === 0 && !!pp && p.turnLog.length > pp.turns;
       const dartsStr = t.darts.map((d) => d.label).join(' ');
       const resultStr = t.bust ? 'BUST' : t.checkout ? `CHECKOUT ${t.scoreBefore}` : `${t.scoreBefore} → ${t.scoreAfter}`;
-      return `<div class="turn-log-entry ${cls}">
+      return `<div class="turn-log-entry ${cls}${isNew ? ' new-entry' : ''}">
         <div><span class="who">${escapeHtml(p.name)}</span><div class="darts">${dartsStr}</div></div>
         <div class="result">${resultStr}</div>
       </div>`;
@@ -369,17 +411,48 @@ function renderGame() {
     return entries;
   }).join('') || '<div class="empty-state">Noch keine Würfe</div>';
 
-  handleLegAndMatchOverlays(g);
+  handleLegAndMatchOverlays(g, prev);
+  prevGameSnapshot = snapshotGame(g);
 }
 
-function renderDartSlots(darts) {
+function renderDartSlots(darts, animateLast = false) {
   let html = '';
   for (let i = 0; i < 3; i++) {
     const d = darts[i];
     if (!d) { html += '<div class="dart-slot"></div>'; continue; }
-    html += `<div class="dart-slot filled${d.bust ? ' bust' : ''}">${d.label}</div>`;
+    const isLast = i === darts.length - 1;
+    html += `<div class="dart-slot filled${d.bust ? ' bust' : ''}${animateLast && isLast ? ' dart-in' : ''}">${d.label}</div>`;
   }
   return html;
+}
+
+function showBigFlash(text, colorClass) {
+  const el = document.createElement('div');
+  el.className = `big-flash ${colorClass}`;
+  el.textContent = text;
+  document.body.appendChild(el);
+  el.addEventListener('animationend', () => el.remove());
+  // Fallback: with reduced-motion (no animation → no animationend) or a hidden tab the flash
+  // would otherwise stay on screen forever.
+  setTimeout(() => el.remove(), 1800);
+}
+
+function launchConfetti(container) {
+  const colors = ['#ff4136', '#ffb020', '#2fae6b', '#f5f3ef', '#ff8a3d'];
+  const wrap = document.createElement('div');
+  wrap.className = 'confetti';
+  for (let i = 0; i < 70; i++) {
+    const s = document.createElement('span');
+    s.style.left = `${50 + (Math.random() * 40 - 20)}%`;
+    s.style.background = colors[i % colors.length];
+    s.style.setProperty('--dx', `${Math.random() * 600 - 300}px`);
+    s.style.setProperty('--rot', `${Math.random() * 1080 - 540}deg`);
+    s.style.setProperty('--dur', `${1.6 + Math.random() * 1.4}s`);
+    s.style.setProperty('--delay', `${Math.random() * 0.4}s`);
+    wrap.appendChild(s);
+  }
+  container.appendChild(wrap);
+  setTimeout(() => wrap.remove(), 3600);
 }
 
 function formatCheckout(suggestion) {
@@ -390,14 +463,19 @@ function formatCheckout(suggestion) {
 let lastLegOverlayKey = null;
 let lastMatchOverlayShown = false;
 
-function handleLegAndMatchOverlays(g) {
+function handleLegAndMatchOverlays(g, prev) {
   const legOverlay = document.getElementById('overlay-leg');
   const matchOverlay = document.getElementById('overlay-match-finished');
+  const justHappened = !!prev && prev.status === 'in_progress';
 
   if (g.status === 'leg_finished' || g.status === 'set_finished') {
     const key = `${g.legNumber}-${g.setNumber}-${g.status}`;
     if (lastLegOverlayKey !== key) {
       lastLegOverlayKey = key;
+      if (justHappened) {
+        showBigFlash(g.status === 'set_finished' ? 'Set!' : 'Checkout!', 'gold');
+        setTimeout(() => launchConfetti(legOverlay), 250);
+      }
       const summary = g.lastLegSummary;
       const icon = g.status === 'set_finished'
         ? '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="var(--gold)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 5H4a3 3 0 0 0 3 5"/><path d="M17 5h3a3 3 0 0 1-3 5"/><path d="M12 13v3"/><path d="M9 20h6"/><path d="M10 17h4l.6 3H9.4l.6-3Z"/></svg>'
@@ -417,6 +495,10 @@ function handleLegAndMatchOverlays(g) {
     matchOverlay.hidden = false;
     if (!lastMatchOverlayShown) {
       lastMatchOverlayShown = true;
+      if (justHappened) {
+        showBigFlash('Game Shot!', 'gold');
+        setTimeout(() => launchConfetti(matchOverlay), 250);
+      }
       const winner = g.players.find((p) => p.id === g.winnerId);
       document.getElementById('match-winner-name').textContent = winner ? winner.name : '';
       document.getElementById('match-summary').innerHTML = g.players.map((p) =>
@@ -656,6 +738,77 @@ document.getElementById('btn-remote-qr').addEventListener('click', () => {
 document.getElementById('overlay-remote-close').addEventListener('click', () => {
   document.getElementById('overlay-remote-qr').hidden = true;
 });
+
+// ---------------------------------------------------------------------------
+// TV mode (fullscreen scoreboard, phones do the input)
+// ---------------------------------------------------------------------------
+
+function enterTvMode() {
+  document.body.classList.add('tv-mode');
+  document.getElementById('btn-tv-exit').hidden = false;
+  socket.emit('get_remote_url', (res) => {
+    if (res.qr) document.getElementById('tv-qr-img').src = res.qr;
+    document.getElementById('tv-qr-url').textContent = res.url;
+  });
+  const el = document.documentElement;
+  if (el.requestFullscreen && !document.fullscreenElement) {
+    el.requestFullscreen().catch(() => { /* fullscreen is a nice-to-have */ });
+  }
+}
+
+function exitTvMode() {
+  document.body.classList.remove('tv-mode');
+  document.getElementById('btn-tv-exit').hidden = true;
+  if (document.fullscreenElement && document.exitFullscreen) {
+    document.exitFullscreen().catch(() => { /* ignore */ });
+  }
+}
+
+document.getElementById('btn-tv-mode').addEventListener('click', enterTvMode);
+document.getElementById('btn-tv-exit').addEventListener('click', exitTvMode);
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement && document.body.classList.contains('tv-mode')) exitTvMode();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.body.classList.contains('tv-mode')) exitTvMode();
+});
+
+// ---------------------------------------------------------------------------
+// Press feedback for pads
+// ---------------------------------------------------------------------------
+
+document.addEventListener('pointerdown', (e) => {
+  const btn = e.target.closest('.numpad-grid button, .numpad-actions .btn, .multiplier-row button');
+  if (!btn) return;
+  btn.classList.add('pressed');
+  setTimeout(() => btn.classList.remove('pressed'), 160);
+});
+
+// ---------------------------------------------------------------------------
+// Desktop integration (only present inside the Electron app, not in a plain browser)
+// ---------------------------------------------------------------------------
+
+if (window.darttracker) {
+  window.darttracker.getVersion().then((v) => {
+    document.getElementById('app-version').textContent = `v${v}`;
+  }).catch(() => {});
+
+  const banner = document.getElementById('update-banner');
+  const bannerText = document.getElementById('update-banner-text');
+  const installBtn = document.getElementById('update-install');
+  window.darttracker.onUpdateStatus((info) => {
+    if (info.state === 'downloading') {
+      bannerText.textContent = `Update auf v${info.version} wird im Hintergrund geladen…`;
+      installBtn.hidden = true;
+      banner.hidden = false;
+    } else if (info.state === 'ready') {
+      bannerText.textContent = `Update auf v${info.version} ist bereit.`;
+      installBtn.hidden = false;
+      banner.hidden = false;
+    }
+  });
+  installBtn.addEventListener('click', () => window.darttracker.installUpdate());
+}
 
 // ---------------------------------------------------------------------------
 // Helpers

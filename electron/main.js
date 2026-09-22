@@ -1,6 +1,8 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, dialog } = require('electron');
+const path = require('path');
+const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
+const { autoUpdater } = require('electron-updater');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4848;
 let mainWindow = null;
@@ -50,6 +52,7 @@ if (!gotLock) {
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
+        preload: path.join(__dirname, 'preload.js'),
       },
     });
 
@@ -60,7 +63,30 @@ if (!gotLock) {
     });
 
     await mainWindow.loadURL(`http://localhost:${port}/`);
+    setupAutoUpdate();
   }
+
+  function sendToWindow(channel, payload) {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+  }
+
+  // Checks GitHub Releases (via latest.yml) for a newer installer, downloads it silently and
+  // installs on the next quit — or immediately when the user clicks the banner's button.
+  // Only the NSIS "Setup" build can update itself; the portable exe and `electron .` skip this.
+  function setupAutoUpdate() {
+    if (!app.isPackaged || process.env.PORTABLE_EXECUTABLE_DIR) return;
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.on('update-available', (info) => sendToWindow('update-status', { state: 'downloading', version: info.version }));
+    autoUpdater.on('update-downloaded', (info) => sendToWindow('update-status', { state: 'ready', version: info.version }));
+    autoUpdater.on('error', (err) => console.error('Auto-Update:', err && err.message ? err.message : err));
+    const check = () => autoUpdater.checkForUpdates().catch(() => {});
+    check();
+    setInterval(check, 4 * 60 * 60 * 1000);
+  }
+
+  ipcMain.handle('get-version', () => app.getVersion());
+  ipcMain.on('install-update', () => autoUpdater.quitAndInstall());
 
   app.whenReady().then(createWindow);
 

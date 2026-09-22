@@ -15,72 +15,135 @@
   <link rel="stylesheet" href="/css/style.css" />
   <style>
     body { padding-bottom: env(safe-area-inset-bottom); }
-    .remote-wrap { padding: 18px 16px; max-width: 480px; margin: 0 auto; }
+    .remote-wrap { padding: 18px 16px 28px; max-width: 480px; margin: 0 auto; }
     .remote-header {
       text-align: center; font-family: var(--font-display); font-size: 0.85rem; font-weight: 700;
-      letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); padding: 8px 0 18px;
+      letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); padding: 8px 0 14px;
     }
+    .section-label { font-size: 0.72rem; color: var(--text-dim); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin: 0 0 10px; }
+    .identity-bar { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 14px; }
+    .identity-bar .chip { padding: 7px 14px; font-size: 0.82rem; }
     .turn-banner { text-align: center; font-size: 1rem; font-weight: 700; margin: 0 0 4px; }
     .turn-banner .who { color: var(--text); }
+    .turn-banner .who.me { color: var(--green); }
     .turn-banner .sub { color: var(--text-dim); font-weight: 500; }
-    .remote-score { font-family: var(--font-display); text-align: center; font-size: 4.4rem; font-weight: 700; line-height: 1; margin: 6px 0; }
+    .remote-score { font-family: var(--font-display); text-align: center; font-size: 4.4rem; font-weight: 700; line-height: 1; margin: 6px 0; display: block; }
+    .remote-score.score-pop { animation: score-pop 0.55s cubic-bezier(0.2, 0.8, 0.2, 1); }
     .remote-dart-slots { display: flex; gap: 10px; justify-content: center; margin: 10px 0 14px; }
     .remote-dart-slots .dart-slot { width: 66px; height: 48px; font-size: 1.05rem; }
-    .remote-checkout {
-      text-align: center; border-radius: var(--radius-sm); padding: 12px; min-height: 1.3em; margin-bottom: 18px;
-    }
-    .remote-checkout:not(:empty) { background: var(--gold-dim); border: 1px solid #6b5220; }
+    .remote-checkout { text-align: center; border-radius: var(--radius-sm); padding: 12px; min-height: 1.3em; margin-bottom: 18px; }
+    .remote-checkout:not(:empty) { background: var(--gold-dim); border: 1px solid #6b5220; animation: checkout-glow 1.8s ease-in-out infinite; }
     .remote-checkout .co-label { display: block; font-size: 0.68rem; letter-spacing: 0.08em; color: var(--text-dim); font-weight: 700; }
     .remote-checkout .co-value { font-family: var(--font-display); color: var(--gold); font-size: 1.15rem; font-weight: 700; }
+    .remote-pad { position: relative; transition: opacity 0.2s; }
+    .remote-pad.locked { opacity: 0.28; pointer-events: none; filter: grayscale(0.4); }
+    .remote-wait {
+      text-align: center; background: var(--bg-card); border: 1px dashed var(--border); border-radius: var(--radius-sm);
+      padding: 14px; margin-bottom: 14px; color: var(--text-dim); font-size: 0.95rem; animation: fade-up 0.3s ease;
+    }
+    .remote-wait strong { color: var(--text); }
     .remote-numpad { display: grid; grid-template-columns: repeat(5, 1fr); gap: 7px; }
     .remote-numpad button {
       padding: 20px 0; font-size: 1.2rem; font-family: var(--font-display); font-weight: 600;
       background: var(--bg-card-2); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text);
+      transition: transform 0.08s ease, background 0.15s;
     }
+    .remote-numpad button.pressed, .remote-numpad button:active { transform: scale(0.9); background: var(--accent); border-color: var(--accent); }
     .remote-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 10px; }
     .remote-actions button { padding: 17px 0; font-size: 0.92rem; justify-content: center; }
     .remote-undo { margin-top: 10px; justify-content: center; }
+    .remote-flow { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; animation: fade-up 0.35s ease; }
+    .remote-flow .btn { justify-content: center; padding: 18px; font-size: 1.05rem; }
+    .remote-flow .flow-title { text-align: center; font-family: var(--font-display); font-size: 1.4rem; font-weight: 700; text-transform: uppercase; color: var(--gold); }
+    .setup-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 14px; }
+    .setup-card .segmented { width: 100%; }
+    .setup-card .segmented button { flex: 1; padding: 11px 0; }
+    .setup-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+    .setup-row .stepper { flex: 0 0 150px; }
   </style>
 </head>
 <body>
   <div class="remote-wrap">
     <div class="remote-header">DartTracker Fernbedienung</div>
 
-    <div id="remote-idle" class="card empty-state" style="margin-top:30px;">
-      Kein Spiel aktiv.<br/>Bitte auf dem Desktop ein Spiel oder Training starten.
+    <!-- No game running: set one up from the phone -->
+    <div id="remote-idle" hidden>
+      <div class="setup-card">
+        <div class="section-label">Neues Spiel · Spieler antippen (Reihenfolge = Wurfreihenfolge)</div>
+        <div class="chip-list" id="remote-setup-players"></div>
+        <div class="row" style="margin-top:12px; flex-wrap:nowrap;">
+          <input type="text" id="remote-new-player-name" placeholder="Neuer Spieler" />
+          <button class="btn" id="remote-add-player" style="white-space:nowrap;">+</button>
+        </div>
+      </div>
+
+      <div class="setup-card">
+        <div class="section-label">Startpunktzahl</div>
+        <div class="segmented" id="remote-setup-score">
+          <button data-value="301">301</button>
+          <button data-value="501" class="active">501</button>
+          <button data-value="701">701</button>
+        </div>
+        <div class="setup-row">
+          <span style="font-size:0.92rem;">Legs zum Sieg</span>
+          <div class="stepper" id="remote-setup-legs">
+            <button type="button" class="stepper-btn" data-step="-1"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
+            <span class="stepper-value" id="remote-setup-legs-value">3</span>
+            <button type="button" class="stepper-btn" data-step="1"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+          </div>
+        </div>
+        <div class="setup-row">
+          <span style="font-size:0.92rem;">Doppel-Out</span>
+          <label class="switch"><input type="checkbox" id="remote-setup-double-out" checked /><span class="track"></span></label>
+        </div>
+      </div>
+
+      <button class="btn btn-primary btn-block btn-lg" id="remote-start-match" style="margin-bottom:10px;">Spiel starten</button>
+      <button class="btn btn-block" id="remote-start-practice">Training starten (erster Spieler)</button>
     </div>
 
+    <!-- Game running -->
     <div id="remote-active" hidden>
+      <div class="identity-bar" id="remote-identity"></div>
+
       <div class="turn-banner" id="remote-turn-text"></div>
       <div class="remote-score" id="remote-score">0</div>
       <div class="remote-dart-slots" id="remote-dart-slots"></div>
       <div class="remote-checkout" id="remote-checkout"></div>
 
-      <div class="segmented input-mode-toggle" id="remote-input-mode" style="margin:0 auto 14px; width:100%;">
-        <button data-mode="numpad" class="active" style="flex:1;">Zahlenfeld</button>
-        <button data-mode="board" style="flex:1;">Dartscheibe</button>
-      </div>
+      <div class="remote-flow" id="remote-flow" hidden></div>
 
-      <div id="remote-input-numpad">
-        <div class="multiplier-row">
-          <button data-mult="1" class="active">Single</button>
-          <button data-mult="2">Double</button>
-          <button data-mult="3">Treble</button>
+      <div class="remote-wait" id="remote-wait" hidden></div>
+
+      <div class="remote-pad" id="remote-pad">
+        <div class="segmented input-mode-toggle" id="remote-input-mode" style="margin:0 auto 14px; width:100%;">
+          <button data-mode="numpad" class="active" style="flex:1;">Zahlenfeld</button>
+          <button data-mode="board" style="flex:1;">Dartscheibe</button>
         </div>
-        <div class="remote-numpad" id="remote-numpad"></div>
+
+        <div id="remote-input-numpad">
+          <div class="multiplier-row">
+            <button data-mult="1" class="active">Single</button>
+            <button data-mult="2">Double</button>
+            <button data-mult="3">Treble</button>
+          </div>
+          <div class="remote-numpad" id="remote-numpad"></div>
+        </div>
+
+        <div class="dartboard-wrap" id="remote-input-board" hidden></div>
+
+        <div class="remote-actions">
+          <button class="btn" id="remote-bull25">25</button>
+          <button class="btn" id="remote-bull50">Bull (50)</button>
+          <button class="btn" id="remote-miss">Fehler</button>
+        </div>
+        <button class="btn btn-block remote-undo" id="remote-undo">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10h9a5 5 0 0 1 0 10h-2"/><path d="M8 5 3 10l5 5"/></svg>
+          Rückgängig
+        </button>
       </div>
 
-      <div class="dartboard-wrap" id="remote-input-board" hidden></div>
-
-      <div class="remote-actions">
-        <button class="btn" id="remote-bull25">25</button>
-        <button class="btn" id="remote-bull50">Bull (50)</button>
-        <button class="btn" id="remote-miss">Fehler</button>
-      </div>
-      <button class="btn btn-block remote-undo" id="remote-undo">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10h9a5 5 0 0 1 0 10h-2"/><path d="M8 5 3 10l5 5"/></svg>
-        Rückgängig
-      </button>
+      <button class="btn btn-block" id="remote-finish-practice" style="margin-top:14px; justify-content:center;" hidden>Training beenden</button>
     </div>
   </div>
 
