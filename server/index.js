@@ -228,6 +228,37 @@ function createServer() {
       ack && ack({ matches: enrichMatchesWithAnalytics(store.loadMatches()), practiceSessions: store.loadPracticeSessions() });
     });
 
+    socket.on('export_data', (ack) => {
+      ack && ack({
+        app: 'darttracker',
+        exportedAt: Date.now(),
+        players,
+        matches: store.loadMatches(),
+        practiceSessions: store.loadPracticeSessions(),
+      });
+    });
+
+    // Merges a backup into the local data: anything whose id already exists is kept as-is,
+    // so importing the same file twice (or on both PCs) never duplicates players or games.
+    socket.on('import_data', (payload, ack) => {
+      const data = payload && typeof payload === 'object' ? payload : {};
+      if (data.app !== 'darttracker') return ack && ack({ ok: false, error: 'Keine DartTracker-Sicherung' });
+      const mergeById = (existing, incoming) => {
+        const known = new Set(existing.map((x) => x.id));
+        const added = (Array.isArray(incoming) ? incoming : []).filter((x) => x && x.id && !known.has(x.id));
+        return { list: existing.concat(added), added: added.length };
+      };
+      const p = mergeById(players, data.players);
+      const m = mergeById(store.loadMatches(), data.matches);
+      const s = mergeById(store.loadPracticeSessions(), data.practiceSessions);
+      players = p.list;
+      store.savePlayers(players);
+      store.saveMatches(m.list);
+      store.savePracticeSessions(s.list);
+      broadcastState();
+      ack && ack({ ok: true, players: p.added, matches: m.added, practiceSessions: s.added });
+    });
+
     socket.on('get_remote_url', async (ack) => {
       const port = server.address() ? server.address().port : null;
       const url = `http://${getLanIp()}:${port}/remote/`;

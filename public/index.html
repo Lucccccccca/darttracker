@@ -300,7 +300,20 @@
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
       Zurück
     </button>
-    <h2 style="font-size:1.9rem; margin-bottom:20px;">Statistiken &amp; Analyse</h2>
+    <div class="row between" style="margin-bottom:20px;">
+      <h2 style="font-size:1.9rem;">Statistiken &amp; Analyse</h2>
+      <div class="row" style="gap:10px;">
+        <button class="btn" id="btn-export-data" title="Alle Spieler, Spiele und Trainings als Datei sichern">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg>
+          Daten sichern
+        </button>
+        <button class="btn" id="btn-import-data" title="Sicherung einspielen (z.B. vom anderen PC) – vorhandene Daten bleiben erhalten">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M4 21h16"/></svg>
+          Sicherung laden
+        </button>
+        <input type="file" id="import-file" accept=".json,application/json" hidden />
+      </div>
+    </div>
 
     <div class="analytics-tabs" id="stats-player-tabs"></div>
 

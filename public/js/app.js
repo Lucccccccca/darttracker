@@ -725,6 +725,44 @@ function renderMatchDetail(match) {
 }
 
 // ---------------------------------------------------------------------------
+// Backup: export / import all data as one JSON file
+// ---------------------------------------------------------------------------
+
+document.getElementById('btn-export-data').addEventListener('click', () => {
+  socket.emit('export_data', (data) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `darttracker-sicherung-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  });
+});
+
+document.getElementById('btn-import-data').addEventListener('click', () => {
+  document.getElementById('import-file').click();
+});
+
+document.getElementById('import-file').addEventListener('change', (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  file.text().then((text) => {
+    let data;
+    try { data = JSON.parse(text); } catch (err) { alert('Datei konnte nicht gelesen werden.'); return; }
+    socket.emit('import_data', data, (res) => {
+      if (!res || !res.ok) { alert(res && res.error ? res.error : 'Import fehlgeschlagen.'); return; }
+      alert(`Sicherung geladen: ${res.players} Spieler, ${res.matches} Spiele, ${res.practiceSessions} Trainings neu übernommen.`);
+      renderStats();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Remote QR overlay
 // ---------------------------------------------------------------------------
 

@@ -58,6 +58,14 @@ function appendMatch(matchRecord) {
   writeJson(MATCHES_FILE, matches);
 }
 
+function saveMatches(matches) {
+  writeJson(MATCHES_FILE, matches);
+}
+
+function savePracticeSessions(sessions) {
+  writeJson(PRACTICE_FILE, sessions);
+}
+
 // --- Practice sessions -------------------------------------------------------
 
 function loadPracticeSessions() {
@@ -90,8 +98,10 @@ module.exports = {
   savePlayers,
   loadMatches,
   appendMatch,
+  saveMatches,
   loadPracticeSessions,
   appendPracticeSession,
+  savePracticeSessions,
   saveCurrentMatch,
   loadCurrentMatch,
   clearCurrentMatch,

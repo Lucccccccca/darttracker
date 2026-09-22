@@ -47,7 +47,8 @@ if (!gotLock) {
       height: 800,
       minWidth: 900,
       minHeight: 600,
-      backgroundColor: '#0f1115',
+      backgroundColor: '#121316',
+      icon: path.join(__dirname, '..', 'build', 'icon.png'),
       autoHideMenuBar: true,
       webPreferences: {
         contextIsolation: true,
