@@ -1,6 +1,6 @@
 {
   "name": "darttracker",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "Lokale Dart-Tracking-App mit Handy-Fernbedienung",
   "main": "electron/main.js",
   "private": true,

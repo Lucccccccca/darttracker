@@ -111,6 +111,13 @@ class X01Match {
     return this.players[this.activePlayerIndex];
   }
 
+  /** Global visit counter: lets the UI show the match history in real chronological order. */
+  _nextSeq() {
+    let max = 0;
+    for (const p of this.players) for (const t of p.turnLog) if (t.seq > max) max = t.seq;
+    return max + 1;
+  }
+
   // Undo works by restoring whole snapshots: a wrong dart can then be taken back even after
   // it ended the turn (player switch), busted, or won the leg — every mutation is reversible.
   _pushHistory() {
@@ -189,6 +196,7 @@ class X01Match {
       set: this.setNumber,
       darts: player.turnDarts.slice(),
       bust,
+      seq: this._nextSeq(),
       scoreBefore: player.turnStartScore,
       scoreAfter: player.currentScore,
     });
@@ -214,6 +222,7 @@ class X01Match {
       darts: player.turnDarts.slice(),
       bust: false,
       checkout: true,
+      seq: this._nextSeq(),
       scoreBefore: player.turnStartScore,
       scoreAfter: 0,
     });
@@ -493,9 +502,16 @@ class ReversibleGame {
     return this.players[this.activePlayerIndex];
   }
 
+  _nextSeq() {
+    let max = 0;
+    for (const p of this.players) for (const t of p.turnLog) if (t.seq > max) max = t.seq;
+    return max + 1;
+  }
+
   _closeVisit(player) {
     player.dartsThrownTotal += player.turnDarts.length;
     player.turnLog.push({
+      seq: this._nextSeq(),
       darts: player.turnDarts.slice(),
       marks: player.turnDarts.reduce((s, d) => s + (d.marks || 0), 0),
       points: player.turnDarts.reduce((s, d) => s + (d.points || 0), 0),

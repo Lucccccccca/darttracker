@@ -379,7 +379,6 @@ function snapshotGame(g) {
 // transitions impossible, which is what made show mode stutter on slower PCs.
 let gameCards = [];
 let gameCardsKey = null;
-let turnLogSignature = null;
 
 function restartAnim(el, cls, ms) {
   el.classList.remove(cls);
@@ -503,25 +502,7 @@ function renderX01Game() {
     }
   });
 
-  const buildLog = (markNew) => g.players.map((p, idx) => {
-    const pp = prev ? prev.players[idx] : null;
-    return p.turnLog.slice(-6).reverse().map((t, i) => {
-      const cls = t.bust ? 'bust' : t.checkout ? 'checkout' : '';
-      const isNew = markNew && i === 0 && !!pp && p.turnLog.length > pp.turns;
-      const dartsStr = t.darts.map((d) => d.label).join(' ');
-      const resultStr = t.bust ? 'BUST' : t.checkout ? `CHECKOUT ${t.scoreBefore}` : `${t.scoreBefore} → ${t.scoreAfter}`;
-      return `<div class="turn-log-entry ${cls}${isNew ? ' new-entry' : ''}">
-        <div><span class="who">${escapeHtml(p.name)}</span><div class="darts">${dartsStr}</div></div>
-        <div class="result">${resultStr}</div>
-      </div>`;
-    }).join('');
-  }).join('') || '<div class="empty-state">Noch keine Würfe</div>';
-
-  const signature = buildLog(false);
-  if (signature !== turnLogSignature) {
-    turnLogSignature = signature;
-    document.getElementById('turn-log').innerHTML = buildLog(true);
-  }
+  renderMatchFeed(g);
 
   handleLegAndMatchOverlays(g, prev);
   prevGameSnapshot = snapshotGame(g);
@@ -584,23 +565,153 @@ function cricketBoardHtml(g, prevMarks) {
     <div class="cr-darts"><div class="dart-slots">${renderDartSlots(active.turnDarts, false)}</div></div>`;
 }
 
-function updateTurnLog(g, prev, describe) {
-  const build = (markNew) => g.players.map((p, idx) => {
-    const pp = prev ? prev.players[idx] : null;
-    return p.turnLog.slice(-6).reverse().map((t, i) => {
-      const isNew = markNew && i === 0 && !!pp && p.turnLog.length > pp.turns;
-      const dartsStr = t.darts.map((d) => d.label).join(' ');
-      return `<div class="turn-log-entry${isNew ? ' new-entry' : ''}">
-        <div><span class="who">${escapeHtml(p.name)}</span><div class="darts">${dartsStr}</div></div>
-        <div class="result">${describe(t)}</div>
-      </div>`;
-    }).join('');
-  }).join('') || '<div class="empty-state">Noch keine Würfe</div>';
-  const signature = build(false);
-  if (signature !== turnLogSignature) {
-    turnLogSignature = signature;
-    document.getElementById('turn-log').innerHTML = build(true);
+// ---- Match history ("Verlauf"): one chronological feed for every mode.
+// Newest visit on top, grouped by leg (X01) or round (Cricket / Rund um die Uhr), with a live row
+// for the visit in progress, a player colour on every row and a short summary per player.
+const PLAYER_COLORS = ['#ff6b5e', '#4da3ff', '#3ccf8e', '#ffb020', '#b57cff', '#2ed3c6'];
+let feedGameId = null;
+let feedCount = 0;
+let feedSignature = null;
+let feedLiveSignature = null;
+let feedSummarySignature = null;
+
+function playerColor(idx) { return PLAYER_COLORS[idx % PLAYER_COLORS.length]; }
+
+function dartChip(d) {
+  const miss = d.value === 0;
+  const cls = d.bust ? ' bust' : miss ? ' miss' : d.multiplier === 3 ? ' t' : d.multiplier === 2 ? ' d' : '';
+  return `<span class="dc${cls}">${miss ? '–' : escapeHtml(d.label)}</span>`;
+}
+
+function visitScored(t) { return t.bust ? 0 : t.scoreBefore - t.scoreAfter; }
+
+/** All finished visits of all players in the order they were thrown, newest first. */
+function collectTurns(g) {
+  const all = [];
+  const n = g.players.length;
+  const hasSeq = g.players.every((p) => p.turnLog.every((t) => typeof t.seq === 'number'));
+  g.players.forEach((p, idx) => p.turnLog.forEach((t, i) => {
+    all.push({ p, idx, t, round: i + 1, order: hasSeq ? t.seq : i * n + idx });
+  }));
+  all.sort((a, b) => b.order - a.order);
+  return all;
+}
+
+function feedEntryHtml(g, e, isNew) {
+  const { p, idx, t } = e;
+  const x01 = g.mode === 'x01';
+  let cls = '', tags = '', big = '', small = '';
+  if (x01) {
+    const scored = visitScored(t);
+    if (t.bust) { cls = ' bust'; tags = '<span class="tl-tag bust">BUST</span>'; big = '0'; small = `bleibt ${t.scoreAfter}`; }
+    else if (t.checkout) { cls = ' checkout'; tags = '<span class="tl-tag out">CHECKOUT</span>'; big = String(t.scoreBefore); small = 'Leg gewonnen'; }
+    else {
+      if (scored === 180) { cls = ' max'; tags = '<span class="tl-tag max">180</span>'; }
+      else if (scored >= 140) { cls = ' ton'; tags = '<span class="tl-tag ton">140+</span>'; }
+      else if (scored >= 100) { cls = ' ton'; tags = '<span class="tl-tag ton">TON</span>'; }
+      big = String(scored); small = `Rest ${t.scoreAfter}`;
+    }
+  } else if (g.mode === 'cricket') {
+    big = String(t.marks); small = t.points ? `Marks · +${t.points}` : t.marks === 1 ? 'Mark' : 'Marks';
+    if (t.marks >= 5) { cls = ' ton'; tags = '<span class="tl-tag ton">STARK</span>'; }
+    if (!t.marks) cls += ' dim';
+  } else {
+    big = String(t.marks); small = 'Treffer';
+    if (t.marks >= 3) { cls = ' ton'; tags = '<span class="tl-tag ton">3 TREFFER</span>'; }
+    if (!t.marks) cls += ' dim';
   }
+  return `<div class="tl-entry${cls}${isNew ? ' new-entry' : ''}" style="--pc:${playerColor(idx)}">
+    <span class="tl-av">${escapeHtml((p.name || '?').trim().charAt(0).toUpperCase())}</span>
+    <div class="tl-main">
+      <div class="tl-top"><span class="tl-who">${escapeHtml(p.name)}</span>${tags}</div>
+      <div class="tl-darts">${t.darts.map(dartChip).join('')}</div>
+    </div>
+    <div class="tl-res"><b>${big}</b><small>${small}</small></div>
+  </div>`;
+}
+
+function feedGroupHeader(g, e, isTop) {
+  if (g.mode === 'x01') {
+    const rec = (g.legHistory || []).find((l) => l.leg === e.t.leg && l.set === e.t.set);
+    const winner = rec ? g.players.find((p) => p.id === rec.winnerId) : null;
+    const label = `Leg ${e.t.leg}${g.setsToWin > 1 ? ` · Set ${e.t.set}` : ''}`;
+    const right = winner
+      ? `<span class="tl-win">Gewonnen: ${escapeHtml(winner.name)}${rec.checkoutScore ? ` · ${rec.checkoutScore}` : ''}</span>`
+      : g.status === 'in_progress' ? '<span class="tl-now">läuft</span>' : '';
+    return `<div class="tl-group"><span>${label}</span>${right}</div>`;
+  }
+  return `<div class="tl-group"><span>Runde ${e.round}</span>${isTop && g.status === 'in_progress' ? '<span class="tl-now">läuft</span>' : ''}</div>`;
+}
+
+function feedSummaryHtml(g) {
+  const x01 = g.mode === 'x01';
+  return g.players.map((p, idx) => {
+    let stats;
+    if (x01) {
+      const scores = p.turnLog.filter((t) => !t.bust).map(visitScored);
+      const best = scores.length ? Math.max(...scores) : 0;
+      const tons = scores.filter((s) => s >= 100).length;
+      stats = `<span>Ø <b>${p.average.toFixed(1)}</b></span><span>Best <b>${best}</b></span><span>100+ <b>${tons}</b></span>`;
+    } else if (g.mode === 'cricket') {
+      stats = `<span>Punkte <b>${p.score}</b></span><span>MPR <b>${p.mpr.toFixed(2)}</b></span>`;
+    } else {
+      stats = `<span>Treffer <b>${p.reached}/${g.totalTargets}</b></span><span>Darts <b>${p.darts}</b></span>`;
+    }
+    const active = idx === g.activePlayerIndex && g.status === 'in_progress';
+    return `<div class="tl-sum${active ? ' active' : ''}" style="--pc:${playerColor(idx)}"><span class="tl-dot"></span><span class="tl-sum-name">${escapeHtml(p.name)}</span>${stats}</div>`;
+  }).join('');
+}
+
+function feedLiveHtml(g) {
+  if (g.status !== 'in_progress') return '';
+  const idx = g.activePlayerIndex;
+  const p = g.players[idx];
+  const chips = p.turnDarts.map(dartChip).join('') + '<span class="dc empty"></span>'.repeat(Math.max(0, 3 - p.turnDarts.length));
+  const rest = g.mode === 'x01' ? `<div class="tl-res"><b>${p.currentScore}</b><small>Rest</small></div>` : '';
+  return `<div class="tl-entry live" style="--pc:${playerColor(idx)}">
+    <span class="tl-av">${escapeHtml((p.name || '?').trim().charAt(0).toUpperCase())}</span>
+    <div class="tl-main"><div class="tl-top"><span class="tl-who">${escapeHtml(p.name)}</span><span class="tl-tag live">AM WURF</span></div><div class="tl-darts">${chips}</div></div>${rest}
+  </div>`;
+}
+
+function renderMatchFeed(g) {
+  if (feedGameId !== g.id) { feedGameId = g.id; feedCount = 0; feedSignature = null; feedLiveSignature = null; feedSummarySignature = null; }
+
+  const summary = feedSummaryHtml(g);
+  if (summary !== feedSummarySignature) {
+    feedSummarySignature = summary;
+    document.getElementById('turn-summary').innerHTML = summary;
+  }
+  const live = feedLiveHtml(g);
+  if (live !== feedLiveSignature) {
+    feedLiveSignature = live;
+    document.getElementById('turn-live').innerHTML = live;
+  }
+
+  const turns = collectTurns(g);
+  const total = turns.length;
+  const build = (markNew) => {
+    if (!turns.length) return '<div class="empty-state">Noch keine Aufnahmen</div>';
+    const shown = turns.slice(0, 60);
+    let html = '';
+    let lastGroup = null;
+    shown.forEach((e, i) => {
+      const group = g.mode === 'x01' ? `${e.t.set}:${e.t.leg}` : `r${e.round}`;
+      if (group !== lastGroup) { html += feedGroupHeader(g, e, i === 0); lastGroup = group; }
+      html += feedEntryHtml(g, e, markNew && i === 0 && total > feedCount && feedCount > 0);
+    });
+    if (turns.length > shown.length) html += `<div class="tl-more">+ ${turns.length - shown.length} ältere Aufnahmen</div>`;
+    return html;
+  };
+  const signature = build(false);
+  if (signature !== feedSignature) {
+    const html = build(true);
+    feedSignature = signature;
+    const el = document.getElementById('turn-log');
+    el.innerHTML = html;
+    el.scrollTop = 0;
+  }
+  feedCount = total;
 }
 
 let prevCricketMarks = null;
@@ -652,7 +763,7 @@ function renderMultiGame(g) {
       }
       prevCricketMarks = marksNow;
     }
-    updateTurnLog(g, prev, (t) => `${t.marks} Marks${t.points ? ` · +${t.points}` : ''}`);
+    renderMatchFeed(g);
   } else {
     board.classList.remove('cricket-wrap');
     const key = `${g.id}:atc:${g.players.length}`;
@@ -687,7 +798,7 @@ function renderMultiGame(g) {
       const pct = Math.round((p.reached / g.totalTargets) * 100);
       setHtml(c, 'checkout', c.checkout, `<div class="atc-bar"><span style="width:${pct}%"></span></div>`);
     });
-    updateTurnLog(g, prev, (t) => `${t.marks} ${t.marks === 1 ? 'Treffer' : 'Treffer'}`);
+    renderMatchFeed(g);
   }
 
   handleLegAndMatchOverlays(g, prev);

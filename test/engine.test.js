@@ -137,3 +137,21 @@ test('Around the Clock: ending early ranks by progress', () => {
   m.endEarly();
   assert.equal(m.winnerId, 'b');
 });
+
+test('visits get a global sequence number that survives undo and restore', () => {
+  const m = x01({ startScore: 301 });
+  for (let i = 0; i < 3; i++) m.throwDart(20, 3);
+  for (let i = 0; i < 3; i++) m.throwDart(1, 1);
+  const copy = X01Match.fromJSON(JSON.parse(JSON.stringify(m.toJSON())));
+  for (let i = 0; i < 3; i++) copy.throwDart(5, 1);
+  const seqs = copy.players.flatMap((p) => p.turnLog.map((t) => t.seq)).sort();
+  assert.deepEqual(seqs, [1, 2, 3]);
+  assert.equal(copy.players[0].turnLog[1].seq, 3, 'second visit of the first player comes after the other player');
+});
+
+test('cricket visits are numbered in the order they were thrown', () => {
+  const m = new CricketMatch({ players: [P('a'), P('b')] });
+  for (let i = 0; i < 6; i++) m.throwDart(20, 1);
+  assert.equal(m.players[0].turnLog[0].seq, 1);
+  assert.equal(m.players[1].turnLog[0].seq, 2);
+});
