@@ -230,7 +230,7 @@ function createDartboardSVG(onThrow, options = {}) {
   svg.addEventListener('pointerdown', (e) => {
     if (activePointer !== null) return;
     activePointer = e.pointerId;
-    svg.setPointerCapture(e.pointerId);
+    try { svg.setPointerCapture(e.pointerId); } catch (err) { /* synthetic/unknown pointer: aiming still works */ }
     lens.hidden = false;
     update(e.clientX, e.clientY);
     e.preventDefault();
