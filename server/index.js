@@ -10,7 +10,13 @@ const store = require('./store');
 const { getLanIp } = require('./network');
 const { X01Match, PracticeSession, CricketMatch, AroundTheClock, findCheckout } = require('./gameEngine');
 
-const GAME_CLASSES = { x01: X01Match, cricket: CricketMatch, atc: AroundTheClock, practice: PracticeSession };
+const { CLASSIC_MODES } = require('./modes');
+
+const GAME_CLASSES = { x01: X01Match, cricket: CricketMatch, atc: AroundTheClock, practice: PracticeSession, ...CLASSIC_MODES };
+
+// Every player gets a fixed colour that is used in all views (scoreboard, history, charts).
+const PLAYER_COLORS = ['#ff6b5e', '#4da3ff', '#3ccf8e', '#ffb020', '#b57cff', '#2ed3c6'];
+const isLocalAddress = (addr) => ['::1', '127.0.0.1', '::ffff:127.0.0.1'].includes(addr);
 
 function createServer() {
   const app = express();
@@ -21,6 +27,12 @@ function createServer() {
 
   // ---- In-memory session state (one shared game at a time, any number of clients) ----
   let players = store.loadPlayers();
+  const nextFreeColor = () => PLAYER_COLORS.find((c) => !players.some((p) => p.color === c)) || PLAYER_COLORS[players.length % PLAYER_COLORS.length];
+  if (players.some((p) => !p.color)) {
+    // players created before colours existed
+    players.forEach((p) => { if (!p.color) p.color = nextFreeColor(); });
+    store.savePlayers(players);
+  }
   let currentGame = null; // X01Match | PracticeSession | null
 
   const savedMatch = store.loadCurrentMatch();
@@ -139,11 +151,19 @@ function createServer() {
     socket.on('add_player', (payload, ack) => {
       const name = (payload && payload.name ? String(payload.name) : '').trim();
       if (!name) return ack && ack({ ok: false, error: 'Name fehlt' });
-      const player = { id: `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`, name, createdAt: Date.now() };
+      const player = { id: `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`, name, color: nextFreeColor(), createdAt: Date.now() };
       players.push(player);
       store.savePlayers(players);
       broadcastState();
       ack && ack({ ok: true, player });
+    });
+
+    socket.on('set_player_color', ({ id, color } = {}) => {
+      const player = players.find((p) => p.id === id);
+      if (!player || !PLAYER_COLORS.includes(color)) return;
+      player.color = color;
+      store.savePlayers(players);
+      broadcastState();
     });
 
     socket.on('delete_player', ({ id } = {}) => {
@@ -158,7 +178,10 @@ function createServer() {
         .filter(Boolean);
       if (selected.length < 1) return;
 
-      if (config.mode === 'cricket') {
+      if (CLASSIC_MODES[config.mode]) {
+        if (config.mode === 'killer' && selected.length < 2) return;
+        currentGame = new CLASSIC_MODES[config.mode]({ players: selected, rounds: Number(config.rounds) || undefined });
+      } else if (config.mode === 'cricket') {
         if (selected.length < 2) return;
         currentGame = new CricketMatch({ players: selected });
       } else if (config.mode === 'atc') {
@@ -174,6 +197,7 @@ function createServer() {
           setsToWin,
           doubleOut: config.doubleOut !== false,
           doubleIn: !!config.doubleIn,
+          startScores: config.startScores && typeof config.startScores === 'object' ? config.startScores : {}, // handicap
         });
       }
       broadcastState();
@@ -244,6 +268,13 @@ function createServer() {
 
     socket.on('get_data_info', (ack) => {
       ack && ack(store.dataInfo());
+    });
+
+    // The extra backup folder is a setting of the PC the app runs on, so only the app itself may change it.
+    socket.on('set_backup_dir', (dir, ack) => {
+      if (!isLocalAddress(socket.handshake.address)) return ack && ack({ ok: false, error: 'Nur am PC einstellbar.' });
+      const result = store.setBackupDir(typeof dir === 'string' ? dir.trim() : '');
+      ack && ack({ ...result, info: store.dataInfo() });
     });
 
     socket.on('get_history', (ack) => {

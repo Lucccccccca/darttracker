@@ -732,6 +732,9 @@ body.tv-mode .cr-darts { margin-top: 1.2vw; }
 body.tv-mode .atc-bar { height: clamp(10px, 1.2vw, 20px); }
 .player-card .score.long { font-size: 3rem; }
 body.tv-mode .player-card .score.long { font-size: clamp(4rem, 11vw, 14rem); }
+/* three or more players share the width: keep three digit scores inside their card */
+body.tv-mode #scoreboard.crowded .player-card .score { font-size: clamp(4.5rem, 11.5vw, 15rem); }
+body.tv-mode #scoreboard.crowded .player-card .score.long { font-size: clamp(3.5rem, 8.5vw, 11rem); }
 
 /* ---- Connection banner ---- */
 @keyframes conn-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
@@ -934,3 +937,53 @@ body.tv-mode .tv-qr { flex-shrink: 0; margin-top: 0.7vw; padding-top: 0.6vw; dis
 body.tv-mode .tv-qr img { width: clamp(70px, 6.5vw, 130px); flex-shrink: 0; }
 body.tv-mode .tv-qr .url { margin-top: 0; font-size: clamp(0.6rem, 0.75vw, 1rem); }
 body.tv-mode .tv-qr .hint { font-size: clamp(0.6rem, 0.75vw, 1rem); }
+
+/* ---- Mode groups in the setup ---- */
+.mode-group-title { font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; color: var(--text-dim); margin: 4px 2px 10px; }
+#setup-mode .mode-picker { margin-bottom: 22px; }
+#setup-rounds-options label { display: block; margin-bottom: 8px; }
+
+/* ---- Handicap ---- */
+.handicap-list { display: grid; gap: 8px; padding: 6px 0 4px; }
+.handicap-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--bg-card-2); }
+.handicap-row input { width: 110px; text-align: right; }
+
+/* ---- Player colour dot ---- */
+.pc-dot { display: inline-block; width: 0.7em; height: 0.7em; border-radius: 50%; margin-right: 0.55em; flex-shrink: 0; vertical-align: baseline; }
+.pc-dot.big { width: 1.15em; height: 1.15em; border: 2px solid rgba(255, 255, 255, 0.25); padding: 0; cursor: pointer; vertical-align: -0.2em; margin-right: 0.7em; }
+.pc-dot.big:hover { transform: scale(1.15); }
+.chip .pc-dot { margin-right: 0.45em; }
+
+/* ---- Cards of the classic modes ---- */
+.player-card.out { opacity: 0.45; }
+.player-card.out .score { color: var(--text-dim); }
+.checkout-suggestion .co-value.text { font-size: 0.95rem; line-height: 1.35; }
+body.tv-mode .checkout-suggestion .co-value.text { font-size: clamp(0.9rem, 1.7vw, 2.1rem); }
+.tl-tag { text-transform: uppercase; }
+.tl-sum.out { opacity: 0.55; }
+.archive-feed { max-height: 360px; margin-top: 6px; }
+.archive-feed .tl-group { background: transparent; position: static; }
+.archive-summary { margin-bottom: 8px; }
+
+/* ---- Heat map ---- */
+.heatmap-wrap { display: flex; flex-wrap: wrap; gap: 28px; align-items: center; }
+#heatmap-board { width: min(360px, 100%); flex-shrink: 0; }
+.heatmap-svg { width: 100%; height: auto; display: block; }
+.heatmap-svg .db-heat { stroke: var(--bg-card); stroke-width: 1; }
+.heatmap-svg .db-rim { fill: #101114; }
+.heatmap-svg .db-label { fill: var(--text-dim); font-size: 13px; font-weight: 700; }
+.heat-list { flex: 1 1 240px; min-width: 220px; }
+.heat-facts { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 14px; color: var(--text-dim); font-size: 0.85rem; }
+.heat-facts b { color: var(--text); font-size: 1.05rem; }
+.heat-top-title { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); font-weight: 700; margin-bottom: 8px; }
+.heat-row { display: grid; grid-template-columns: 3.2em 1fr 3em; align-items: center; gap: 10px; padding: 4px 0; font-size: 0.9rem; }
+.heat-label { font-weight: 700; }
+.heat-bar { height: 8px; border-radius: 99px; background: var(--bg-card-2); overflow: hidden; }
+.heat-bar span { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+.heat-n { text-align: right; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+/* ---- Second backup folder ---- */
+.backup-extra { margin-top: 16px; }
+.backup-extra-row { display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: center; justify-content: space-between; }
+.backup-extra .hint { color: var(--text-dim); font-size: 0.85rem; line-height: 1.5; margin-top: 4px; max-width: 640px; }
+.backup-extra code { background: var(--bg-card-2); padding: 1px 6px; border-radius: 5px; }

@@ -261,3 +261,27 @@ function createDartboardSVG(onThrow, options = {}) {
 
   return wrap;
 }
+
+/** Read-only board coloured by how often each field was hit. counts: { 'mult x value': n }, e.g. '3x20'. */
+function createHeatmapSVG(counts) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const size = 400;
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
+  svg.setAttribute('class', 'heatmap-svg');
+  const board = buildBoard(NS, DARTBOARD_RADII, size, true);
+  svg.appendChild(board);
+  const max = Math.max(1, ...Object.values(counts));
+  board.querySelectorAll('.db-zone').forEach((zone) => {
+    const value = Number(zone.dataset.value);
+    const mult = Number(zone.dataset.mult);
+    const n = counts[`${mult}x${value}`] || 0;
+    zone.setAttribute('class', 'db-zone db-heat');
+    zone.style.fill = n ? `rgba(255, 65, 54, ${(0.18 + 0.82 * Math.sqrt(n / max)).toFixed(2)})` : '#22252b';
+    const tip = document.createElementNS(NS, 'title');
+    const name = value === 25 ? (mult === 2 ? 'Bull' : '25') : `${mult === 3 ? 'T' : mult === 2 ? 'D' : 'S'}${value}`;
+    tip.textContent = `${name} · ${n}×`;
+    zone.appendChild(tip);
+  });
+  return svg;
+}

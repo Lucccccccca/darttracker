@@ -14,12 +14,13 @@ let setupSelectedIds = [];
 let setupScore = 501;
 let setupLegs = 3;
 let setupMode = 'x01';
+const setupRoundsByMode = {};
+let setupHandicap = false;
+const setupHandicapScores = {};
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-
-const MODE_LABELS = { x01: 'X01', cricket: 'Cricket', atc: 'Rund um die Uhr' };
 
 // socket.io would queue emits while offline and fire them on reconnect — for a scoring app that
 // means stale darts landing on the wrong player. Refuse instead, and say so.
@@ -126,7 +127,7 @@ function renderSetupPlayers() {
     const idx = setupSelectedIds.indexOf(p.id);
     const chip = document.createElement('button');
     chip.className = 'chip' + (idx >= 0 ? ' selected' : '');
-    chip.innerHTML = (idx >= 0 ? `<span class="order-badge">${idx + 1}</span>` : '') + escapeHtml(p.name);
+    chip.innerHTML = `<span class="pc-dot" style="background:${p.color || '#888'}"></span>` + (idx >= 0 ? `<span class="order-badge">${idx + 1}</span>` : '') + escapeHtml(p.name);
     chip.addEventListener('click', () => {
       const existing = setupSelectedIds.indexOf(p.id);
       if (existing >= 0) setupSelectedIds.splice(existing, 1);
@@ -139,7 +140,23 @@ function renderSetupPlayers() {
   if (latest.players.length === 0) {
     list.innerHTML = '<div style="color:var(--text-dim); font-size:0.9rem;">Noch keine Spieler – unten anlegen.</div>';
   }
+  renderHandicap();
 }
+
+function renderHandicap() {
+  const list = document.getElementById('remote-handicap-list');
+  const on = setupHandicap && setupMode === 'x01';
+  list.hidden = !on;
+  if (!on) return;
+  const selected = setupSelectedIds.map((id) => latest.players.find((p) => p.id === id)).filter(Boolean);
+  list.innerHTML = selected.length ? selected.map((p) => `<label class="handicap-row">
+      <span><span class="pc-dot" style="background:${p.color || '#888'}"></span>${escapeHtml(p.name)}</span>
+      <input type="number" min="2" step="1" data-hid="${p.id}" value="${setupHandicapScores[p.id] || setupScore}" />
+    </label>`).join('') : '<div class="setup-hint">Wähle zuerst die Spieler aus.</div>';
+  list.querySelectorAll('input').forEach((inp) => inp.addEventListener('input', () => { setupHandicapScores[inp.dataset.hid] = Number(inp.value) || 0; }));
+}
+
+document.getElementById('remote-setup-handicap').addEventListener('change', (e) => { setupHandicap = e.target.checked; renderHandicap(); });
 
 document.getElementById('remote-add-player').addEventListener('click', () => {
   const input = document.getElementById('remote-new-player-name');
@@ -159,6 +176,7 @@ document.querySelectorAll('#remote-setup-score button').forEach((btn) => {
     document.querySelectorAll('#remote-setup-score button').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
     setupScore = Number(btn.dataset.value);
+    renderHandicap();
   });
 });
 
@@ -169,26 +187,38 @@ document.querySelectorAll('#remote-setup-legs .stepper-btn').forEach((btn) => {
   });
 });
 
-const MODE_HINTS = {
-  cricket: 'Cricket: 20 bis 15 und Bull je dreimal treffen (Double = 2, Triple = 3). Weitere Treffer auf offene Zahlen geben Punkte. Ab 2 Spielern.',
-  atc: 'Rund um die Uhr: 1 bis 20 und zuletzt Bull der Reihe nach treffen. Wer zuerst fertig ist, gewinnt.',
-};
-document.querySelectorAll('#remote-setup-mode button').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    setupMode = btn.dataset.mode;
-    document.querySelectorAll('#remote-setup-mode button').forEach((b) => b.classList.toggle('active', b === btn));
-    document.getElementById('remote-x01-options').style.display = setupMode === 'x01' ? '' : 'none';
-    const hint = document.getElementById('remote-mode-hint');
-    hint.style.display = setupMode === 'x01' ? 'none' : 'block';
-    hint.textContent = MODE_HINTS[setupMode] || '';
-    buzz(6);
-  });
-});
+function applyRemoteMode(mode) {
+  setupMode = mode;
+  const info = modeInfo(mode) || MODES[0];
+  document.querySelectorAll('#remote-setup-mode .chip').forEach((b) => b.classList.toggle('selected', b.dataset.mode === mode));
+  document.getElementById('remote-x01-options').style.display = mode === 'x01' ? '' : 'none';
+  const hint = document.getElementById('remote-mode-hint');
+  hint.style.display = info.hint ? 'block' : 'none';
+  hint.textContent = info.hint || '';
+  const box = document.getElementById('remote-rounds-options');
+  box.hidden = !info.rounds;
+  if (info.rounds) {
+    document.getElementById('remote-rounds-label').textContent = info.roundsLabel;
+    const current = setupRoundsByMode[mode] || info.rounds[0];
+    const seg = document.getElementById('remote-rounds');
+    seg.innerHTML = info.rounds.map((r) => `<button data-value="${r}" class="${r === current ? 'active' : ''}">${r}</button>`).join('');
+    seg.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+      setupRoundsByMode[mode] = Number(b.dataset.value);
+      seg.querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
+    }));
+  }
+  renderHandicap();
+}
+
+document.getElementById('remote-setup-mode').innerHTML = MODES.map((m) => `<button class="chip" data-mode="${m.key}">${escapeHtml(m.label)}</button>`).join('');
+document.querySelectorAll('#remote-setup-mode .chip').forEach((btn) => btn.addEventListener('click', () => { applyRemoteMode(btn.dataset.mode); buzz(6); }));
+applyRemoteMode('x01');
 
 document.getElementById('remote-start-match').addEventListener('click', () => {
   if (setupSelectedIds.length === 0) { alert('Bitte mindestens einen Spieler antippen.'); return; }
-  if (setupMode === 'cricket' && setupSelectedIds.length < 2) { alert('Cricket braucht mindestens 2 Spieler.'); return; }
-  send('start_match', {
+  const info = modeInfo(setupMode) || MODES[0];
+  if (setupSelectedIds.length < info.min) { alert(`${info.label} braucht mindestens ${info.min} Spieler.`); return; }
+  const config = {
     mode: setupMode,
     playerIds: setupSelectedIds,
     startScore: setupScore,
@@ -196,7 +226,13 @@ document.getElementById('remote-start-match').addEventListener('click', () => {
     setsToWin: 1,
     doubleOut: document.getElementById('remote-setup-double-out').checked,
     doubleIn: false,
-  });
+  };
+  if (info.rounds) config.rounds = setupRoundsByMode[setupMode] || info.rounds[0];
+  if (setupMode === 'x01' && setupHandicap) {
+    config.startScores = {};
+    setupSelectedIds.forEach((id) => { config.startScores[id] = Number(setupHandicapScores[id]) || setupScore; });
+  }
+  send('start_match', config);
   buzz(20);
 });
 
@@ -219,10 +255,10 @@ function setIdentity(id) {
 
 function renderIdentityBar(g) {
   const bar = document.getElementById('remote-identity');
-  if (g.mode !== 'x01' || g.players.length < 2) { bar.innerHTML = ''; return; }
+  if (g.mode === 'practice' || g.players.length < 2) { bar.innerHTML = ''; return; }
   const options = [{ id: '', name: 'Alle steuern' }, ...g.players.map((p) => ({ id: p.id, name: p.name }))];
   bar.innerHTML = options.map((o) =>
-    `<button class="chip${identity === o.id ? ' selected' : ''}" data-id="${o.id}">${o.id ? 'Ich bin ' : ''}${escapeHtml(o.name)}</button>`
+    `<button class="chip${identity === o.id ? ' selected' : ''}" data-id="${o.id}">${o.id ? `<span class="pc-dot" style="background:${(latest.players.find((p) => p.id === o.id) || {}).color || '#888'}"></span>Ich bin ` : ''}${escapeHtml(o.name)}</button>`
   ).join('');
   bar.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => setIdentity(b.dataset.id)));
 }
@@ -240,6 +276,39 @@ function renderDartSlots(darts, animateLast) {
     html += `<div class="dart-slot filled${d.bust ? ' bust' : ''}${animateLast && isLast ? ' dart-in' : ''}">${d.label}</div>`;
   }
   return html;
+}
+
+function isRoundGame(g) { return !['x01', 'cricket', 'atc', 'practice'].includes(g.mode); }
+
+/** The last few visits of everybody, so the phone shows what just happened without looking at the PC. */
+function renderHistory(g) {
+  const box = document.getElementById('remote-history');
+  const turns = [];
+  const n = g.players.length;
+  g.players.forEach((p, idx) => (p.turnLog || []).forEach((t, i) => {
+    turns.push({ p, idx, t, order: typeof t.seq === 'number' ? t.seq : i * n + idx });
+  }));
+  turns.sort((a, b) => b.order - a.order);
+  const shown = turns.slice(0, 6);
+  box.hidden = shown.length === 0;
+  document.getElementById('remote-history-list').innerHTML = shown.map(({ p, idx, t }) => {
+    let res; let cls = '';
+    if (g.mode === 'x01') {
+      res = t.bust ? 'BUST' : String(t.checkout ? t.scoreBefore : t.scoreBefore - t.scoreAfter);
+      if (t.bust) cls = 'bad'; else if (t.checkout || t.scoreBefore - t.scoreAfter >= 100) cls = 'good';
+    } else if (g.mode === 'cricket' || g.mode === 'atc') {
+      res = `${t.marks}`;
+    } else if (g.mode === 'killer') {
+      res = String(t.points || 0);
+    } else {
+      const pts = t.points || 0;
+      res = g.mode === 'golf' ? String(pts) : pts > 0 ? `+${pts}` : String(pts);
+      if (pts < 0) cls = 'bad';
+    }
+    const color = (latest.players.find((x) => x.id === p.id) || {}).color || '#888';
+    const note = t.note ? ` · ${escapeHtml(t.note)}` : '';
+    return `<div class="hrow" style="--pc:${color}"><span class="hwho">${escapeHtml(p.name)}</span><span><span class="hdarts">${t.darts.map((d) => d.label).join(' ')}${note}</span></span><span class="hres ${cls}">${res}</span></div>`;
+  }).join('');
 }
 
 function render() {
@@ -270,7 +339,7 @@ function render() {
   if (g.mode !== 'practice') {
     const player = g.players[g.activePlayerIndex];
     const display = g.mode === 'x01' ? player.currentScore : player.displayScore;
-    const where = g.mode === 'x01' ? `Leg ${g.legNumber}` : MODE_LABELS[g.mode];
+    const where = g.mode === 'x01' ? `Leg ${g.legNumber}` : (isRoundGame(g) && g.status === 'in_progress' ? `${MODE_LABELS[g.mode]} · ${g.totalRounds ? `${g.roundNumber}/${g.totalRounds}` : `Runde ${g.roundNumber}`}` : MODE_LABELS[g.mode]);
     const identityPlayer = identity ? g.players.find((p) => p.id === identity) : null;
     const isMe = !!identityPlayer && identityPlayer.id === player.id;
     const sameGame = prevSnapshot && prevSnapshot.gameId === g.id;
@@ -282,6 +351,7 @@ function render() {
       : `<span class="who">${escapeHtml(player.name)} ist dran</span> <span class="sub">— ${where}</span>`;
     scoreEl.textContent = display;
     scoreEl.classList.toggle('long', String(display).length > 3);
+    renderHistory(g);
     scoreEl.classList.remove('score-pop');
     if (scoreChanged) { void scoreEl.offsetWidth; scoreEl.classList.add('score-pop'); }
     document.getElementById('remote-dart-slots').innerHTML = renderDartSlots(player.turnDarts, dartAdded);
@@ -292,8 +362,10 @@ function render() {
     } else if (g.mode === 'cricket') {
       const open = player.openNumbers.map((n) => (n === 25 ? 'B' : n)).join(' · ');
       infoHtml = `<span class="co-label">NOCH OFFEN</span><span class="co-value">${open || 'alles zu – Punkte holen'}</span>`;
-    } else {
+    } else if (g.mode === 'atc') {
       infoHtml = `<span class="co-label">${player.reached} / ${g.totalTargets} GETROFFEN</span><span class="co-value">Ziel: ${display}</span>`;
+    } else if (g.status === 'in_progress' && g.targetLabel) {
+      infoHtml = `<span class="co-label">${g.mode === 'killer' ? 'DEIN ZIEL' : 'ZIEL'}</span><span class="co-value${g.targetLabel.length > 14 ? ' small' : ''}">${escapeHtml(g.targetLabel)}</span>`;
     }
     document.getElementById('remote-checkout').innerHTML = infoHtml;
 
@@ -355,6 +427,7 @@ function render() {
     undoBtn.disabled = false;
     document.getElementById('remote-undo-label').textContent = 'Letzten Wurf zurück';
 
+    document.getElementById('remote-history').hidden = true;
     prevSnapshot = { gameId: g.id, playerId: null, score: g.totalPoints, darts: g.turnDarts.length };
   }
 }

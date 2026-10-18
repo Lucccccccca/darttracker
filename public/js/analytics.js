@@ -77,6 +77,51 @@ function computeOtherModes(playerId, matches) {
   };
 }
 
+/** Per-mode results for the classic games (Shanghai, Killer, Golf …): played, won and best result. */
+function computeClassicModes(playerId, matches) {
+  const result = [];
+  MODES.filter((m) => !['x01', 'cricket', 'atc'].includes(m.key)).forEach((info) => {
+    const mine = matches.filter((m) => m.mode === info.key && m.players.some((p) => p.id === playerId));
+    if (!mine.length) return;
+    const own = (m) => m.players.find((p) => p.id === playerId);
+    const full = mine.filter((m) => !m.endedEarly).map(own).filter((p) => p && !p.out);
+    const scores = full.map((p) => p.score);
+    let best = null;
+    if (scores.length) best = info.lowBest ? Math.min(...scores) : Math.max(...scores);
+    result.push({
+      mode: info.key,
+      label: info.label,
+      played: mine.length,
+      won: mine.filter((m) => m.winnerId === playerId).length,
+      best,
+      bestLabel: `Bestwert ${info.label}${info.unit ? ` (${info.unit})` : ''}`,
+    });
+  });
+  return result;
+}
+
+/** How often each field was hit, from the stored darts of matches (and optionally training rounds). */
+function computeHeatmap(playerId, matches, sessions = []) {
+  const counts = {};
+  let total = 0;
+  let misses = 0;
+  const add = (d) => {
+    if (!d.value) { misses += 1; return; }
+    const key = `${d.multiplier}x${d.value}`;
+    counts[key] = (counts[key] || 0) + 1;
+    total += 1;
+  };
+  matches.forEach((m) => m.players.forEach((p) => {
+    if (playerId !== 'all' && p.id !== playerId) return;
+    (p.turnLog || []).forEach((t) => (t.darts || []).forEach(add));
+  }));
+  sessions.forEach((s) => {
+    if (playerId !== 'all' && s.player.id !== playerId) return;
+    (s.rounds || []).forEach((r) => (r.darts || []).forEach(add));
+  });
+  return { counts, total, misses };
+}
+
 /** Builds a practice/training analytics summary for one player. */
 function computePracticeOverview(playerId, sessions) {
   const relevant = sessions

@@ -104,6 +104,13 @@ if (!gotLock) {
 
   ipcMain.handle('get-version', () => app.getVersion());
   ipcMain.on('install-update', () => autoUpdater.quitAndInstall());
+  ipcMain.handle('choose-folder', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Ordner für die zweite Sicherung wählen',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    return result.canceled || !result.filePaths.length ? null : result.filePaths[0];
+  });
 
   app.whenReady().then(createWindow);
 

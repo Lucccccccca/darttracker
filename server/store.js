@@ -11,6 +11,7 @@ const PLAYERS_FILE = path.join(DATA_DIR, 'players.json');
 const MATCHES_FILE = path.join(DATA_DIR, 'matches.json');
 const PRACTICE_FILE = path.join(DATA_DIR, 'practice-sessions.json');
 const CURRENT_MATCH_FILE = path.join(DATA_DIR, 'current-match.json');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -133,16 +134,84 @@ function autoBackup(keep = 7) {
     try {
       const old = JSON.parse(fs.readFileSync(file, 'utf8'));
       const oldTotal = (old.players || []).length + (old.matches || []).length + (old.practiceSessions || []).length;
-      if (oldTotal > total) { pruneBackups(keep); return file; }
+      if (oldTotal > total) { pruneBackups(keep); mirrorBackup(file, keep); return file; }
     } catch (e) { /* unreadable old backup: overwrite */ }
   }
   writeJson(file, { app: 'darttracker', exportedAt: Date.now(), players, matches, practiceSessions: sessions });
   pruneBackups(keep);
+  mirrorBackup(file, keep);
   return file;
 }
 
+// --- Settings & second backup location ----------------------------------------------------
+// A copy of every daily backup can go to another folder (USB stick, OneDrive, second disk), so a
+// broken drive does not take the data and its backups with it.
+
+function loadSettings() {
+  return readJson(SETTINGS_FILE, {});
+}
+
+function saveSettings(settings) {
+  writeJson(SETTINGS_FILE, settings);
+}
+
+let lastMirror = null; // { ok, at, error?, dir }
+
+function backupTotal(file) {
+  try {
+    const b = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return (b.players || []).length + (b.matches || []).length + (b.practiceSessions || []).length;
+  } catch (e) {
+    return -1;
+  }
+}
+
+/** Copies today's backup into the chosen extra folder; never replaces a fuller copy with a smaller one. */
+function mirrorBackup(localFile, keep = 7) {
+  const dir = loadSettings().backupDir;
+  if (!dir) { lastMirror = null; return null; }
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const target = path.join(dir, path.basename(localFile));
+    if (!fs.existsSync(target) || backupTotal(target) <= backupTotal(localFile)) fs.copyFileSync(localFile, target);
+    const all = fs.readdirSync(dir).filter((f) => BACKUP_RE.test(f)).sort();
+    all.slice(0, Math.max(0, all.length - keep)).forEach((f) => {
+      try { fs.unlinkSync(path.join(dir, f)); } catch (e) { /* ignore */ }
+    });
+    lastMirror = { ok: true, at: Date.now(), dir };
+  } catch (err) {
+    lastMirror = { ok: false, at: Date.now(), dir, error: err.message };
+  }
+  return lastMirror;
+}
+
+/** Sets (or clears, with an empty value) the extra backup folder. Returns { ok, error? }. */
+function setBackupDir(dir) {
+  const settings = loadSettings();
+  if (!dir) {
+    delete settings.backupDir;
+    saveSettings(settings);
+    lastMirror = null;
+    return { ok: true };
+  }
+  const resolved = path.resolve(String(dir));
+  try {
+    fs.mkdirSync(resolved, { recursive: true });
+    const probe = path.join(resolved, '.darttracker-write-test');
+    fs.writeFileSync(probe, 'ok');
+    fs.unlinkSync(probe);
+  } catch (err) {
+    return { ok: false, error: 'In diesen Ordner kann nicht geschrieben werden.' };
+  }
+  settings.backupDir = resolved;
+  saveSettings(settings);
+  const local = autoBackup();
+  if (local) mirrorBackup(local);
+  return { ok: true, dir: resolved };
+}
+
 function dataInfo() {
-  return { dir: DATA_DIR, backupDir: BACKUP_DIR, backups: listBackups() };
+  return { dir: DATA_DIR, backupDir: BACKUP_DIR, backups: listBackups(), extraBackupDir: loadSettings().backupDir || null, mirror: lastMirror };
 }
 
 module.exports = {
@@ -159,4 +228,6 @@ module.exports = {
   clearCurrentMatch,
   autoBackup,
   dataInfo,
+  loadSettings,
+  setBackupDir,
 };

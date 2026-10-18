@@ -39,6 +39,7 @@
       box-shadow: 0 0 22px 2px rgba(255, 176, 32, 0.45); animation: glow-pulse 1.8s ease-in-out infinite; will-change: opacity;
     }
     .remote-checkout .co-label { display: block; font-size: 0.68rem; letter-spacing: 0.08em; color: var(--text-dim); font-weight: 700; }
+    .remote-checkout .co-value.small { font-size: 0.95rem; line-height: 1.35; }
     .remote-checkout .co-value { font-family: var(--font-display); color: var(--gold); font-size: 1.15rem; font-weight: 700; }
     .remote-pad { position: relative; transition: opacity 0.2s; }
     .remote-pad.locked { opacity: 0.28; pointer-events: none; filter: grayscale(0.4); }
@@ -68,6 +69,16 @@
     .setup-card .segmented button { flex: 1; padding: 11px 0; }
     .setup-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
     .setup-row .stepper { flex: 0 0 150px; }
+    #remote-setup-mode { margin-top: 2px; }
+    #remote-setup-mode .chip { padding: 9px 13px; font-size: 0.85rem; }
+    .handicap-list { margin-top: 10px; }
+    .remote-history { margin-top: 22px; }
+    .remote-history .hrow { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 9px 12px; margin-bottom: 6px; border-radius: var(--radius-sm); background: var(--bg-card-2); border-left: 4px solid var(--pc, var(--border)); font-size: 0.85rem; }
+    .remote-history .hwho { font-weight: 700; }
+    .remote-history .hdarts { color: var(--text-dim); font-size: 0.78rem; margin-top: 2px; }
+    .remote-history .hres { font-family: var(--font-display); font-size: 1.3rem; font-weight: 700; text-align: right; }
+    .remote-history .hres.bad { color: var(--accent); }
+    .remote-history .hres.good { color: var(--gold); }
   </style>
 </head>
 <body>
@@ -90,11 +101,7 @@
 
       <div class="setup-card">
         <div class="section-label">Spielart</div>
-        <div class="segmented" id="remote-setup-mode">
-          <button data-mode="x01" class="active">X01</button>
-          <button data-mode="cricket">Cricket</button>
-          <button data-mode="atc">Rund um die Uhr</button>
-        </div>
+        <div class="chip-list" id="remote-setup-mode"></div>
         <div id="remote-x01-options">
         <div class="section-label" style="margin-top:16px;">Startpunktzahl</div>
         <div class="segmented" id="remote-setup-score">
@@ -114,6 +121,15 @@
           <span style="font-size:0.92rem;">Doppel-Out</span>
           <label class="switch"><input type="checkbox" id="remote-setup-double-out" checked /><span class="track"></span></label>
         </div>
+        <div class="setup-row">
+          <span style="font-size:0.92rem;">Handicap <span style="color:var(--text-dim);">· eigene Startpunktzahl</span></span>
+          <label class="switch"><input type="checkbox" id="remote-setup-handicap" /><span class="track"></span></label>
+        </div>
+        <div class="handicap-list" id="remote-handicap-list" hidden></div>
+        </div>
+        <div id="remote-rounds-options" hidden>
+          <div class="section-label" style="margin-top:16px;" id="remote-rounds-label"></div>
+          <div class="segmented" id="remote-rounds"></div>
         </div>
         <div id="remote-mode-hint" style="display:none; margin-top:14px; font-size:0.85rem; color:var(--text-dim); line-height:1.5;"></div>
       </div>
@@ -165,6 +181,10 @@
         <span id="remote-undo-label">Letzten Wurf zurück</span>
       </button>
 
+      <div class="remote-history" id="remote-history" hidden>
+        <div class="section-label">Letzte Aufnahmen</div>
+        <div id="remote-history-list"></div>
+      </div>
       <button class="btn btn-block" id="remote-finish-practice" style="margin-top:14px; justify-content:center;" hidden>Training beenden</button>
       <button class="btn btn-block btn-ghost" id="remote-end-game" style="margin-top:22px; justify-content:center; color:var(--text-dim);" hidden>Spiel beenden &amp; werten</button>
     </div>
@@ -177,6 +197,7 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/js/dartboard.js"></script>
+  <script src="/js/modes-data.js"></script>
   <script src="/remote/remote.js"></script>
 </body>
 </html>

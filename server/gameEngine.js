@@ -68,7 +68,7 @@ function nextId(prefix) {
 // ---------------------------------------------------------------------------
 
 class X01Match {
-  constructor({ players, startScore, legsToWin, setsToWin, doubleOut, doubleIn }) {
+  constructor({ players, startScore, legsToWin, setsToWin, doubleOut, doubleIn, startScores = {} }) {
     this.id = nextId('match');
     this.mode = 'x01';
     this.startedAt = Date.now();
@@ -83,9 +83,10 @@ class X01Match {
       name: p.name,
       legsWon: 0,
       setsWon: 0,
-      currentScore: startScore,
+      startScore: Number(startScores[p.id]) > 1 ? Number(startScores[p.id]) : startScore, // handicap
+      currentScore: Number(startScores[p.id]) > 1 ? Number(startScores[p.id]) : startScore,
       turnDarts: [],
-      turnStartScore: startScore,
+      turnStartScore: Number(startScores[p.id]) > 1 ? Number(startScores[p.id]) : startScore,
       hasDoubledIn: !doubleIn,
       dartsThrownTotal: 0,
       pointsScoredTotal: 0,
@@ -266,9 +267,9 @@ class X01Match {
     this.activePlayerIndex = this.legStarterIndex;
 
     for (const p of this.players) {
-      p.currentScore = this.startScore;
+      p.currentScore = p.startScore || this.startScore;
       p.turnDarts = [];
-      p.turnStartScore = this.startScore;
+      p.turnStartScore = p.startScore || this.startScore;
       p.hasDoubledIn = !this.doubleIn;
       if (startingNewSet) p.legsWon = 0;
     }
@@ -319,6 +320,7 @@ class X01Match {
       canUndo: this.canUndo,
       lastLegSummary: this.lastLegSummary,
       legHistory: this.legHistory,
+      handicap: this.players.some((p) => (p.startScore || this.startScore) !== this.startScore),
       players: this.players.map((p) => ({
         ...p,
         average: p.dartsThrownTotal > 0 ? (p.pointsScoredTotal / p.dartsThrownTotal) * 3 : 0,
@@ -354,9 +356,11 @@ class X01Match {
       winnerId: this.winnerId,
       endedEarly: this.endedEarly,
       legHistory: this.legHistory,
+      handicap: this.players.some((p) => (p.startScore || this.startScore) !== this.startScore),
       players: json.players.map((p) => ({
         id: p.id,
         name: p.name,
+        startScore: p.startScore || this.startScore,
         legsWon: p.legsWon,
         setsWon: p.setsWon,
         average: p.average,
@@ -508,13 +512,14 @@ class ReversibleGame {
     return max + 1;
   }
 
-  _closeVisit(player) {
+  _closeVisit(player, extra = {}) {
     player.dartsThrownTotal += player.turnDarts.length;
     player.turnLog.push({
       seq: this._nextSeq(),
       darts: player.turnDarts.slice(),
       marks: player.turnDarts.reduce((s, d) => s + (d.marks || 0), 0),
       points: player.turnDarts.reduce((s, d) => s + (d.points || 0), 0),
+      ...extra,
     });
     player.turnDarts = [];
   }
@@ -672,6 +677,7 @@ class CricketMatch extends ReversibleGame {
         mpr: this._mpr(p),
         dartsThrownTotal: p.dartsThrownTotal,
         closed: CRICKET_NUMBERS.filter((n) => p.marks[n] >= 3).length,
+        turnLog: p.turnLog,
       })),
     };
   }
@@ -766,9 +772,13 @@ class AroundTheClock extends ReversibleGame {
         reached: p.reached,
         finished: p.reached >= CLOCK_TARGETS.length,
         dartsThrownTotal: p.dartsThrownTotal,
+        turnLog: p.turnLog,
       })),
     };
   }
 }
 
-module.exports = { X01Match, PracticeSession, CricketMatch, AroundTheClock, CRICKET_NUMBERS, CLOCK_TARGETS, findCheckout, DART_CATALOGUE };
+module.exports = {
+  X01Match, PracticeSession, CricketMatch, AroundTheClock, ReversibleGame,
+  CRICKET_NUMBERS, CLOCK_TARGETS, findCheckout, DART_CATALOGUE, formatDartLabel, nextId,
+};
