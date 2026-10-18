@@ -918,6 +918,19 @@ body.lite .home-buttons .btn:hover, body.lite .stat-tile:hover { transform: none
 @keyframes tl-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 body.lite .tl-tag.live { animation: none; }
 
-body.tv-mode .turn-log-panel { padding: 1.4vw; border-radius: 1.2vw; font-size: clamp(0.85rem, 1.25vw, 1.5rem); }
-body.tv-mode .turn-log-panel h3 { font-size: clamp(0.8rem, 1.1vw, 1.3rem); }
-body.tv-mode .turn-log { max-height: 46vh; }
+body.tv-mode .turn-log-panel {
+  padding: 1.1vw; border-radius: 1.2vw; font-size: clamp(0.8rem, 0.92vw, 1.25rem);
+  display: flex; flex-direction: column; max-height: calc(100vh - 12.5vw); min-height: 0;
+}
+body.tv-mode .turn-log-panel h3 { font-size: clamp(0.75rem, 0.95vw, 1.2rem); margin-bottom: 0.7vw; flex-shrink: 0; }
+body.tv-mode .turn-summary, body.tv-mode .turn-live { flex-shrink: 0; }
+body.tv-mode .turn-log { flex: 1 1 auto; min-height: 0; max-height: none; }
+body.tv-mode .tl-sum { gap: 0.2em 0.7em; padding: 0.45em 0.7em; }
+body.tv-mode .tl-darts { flex-wrap: nowrap; }
+body.tv-mode .dc { min-width: 0; padding: 0.1em 0.4em; }
+body.tv-mode .tl-av { width: 1.8em; height: 1.8em; }
+body.tv-mode .tl-entry { gap: 0.6em; }
+body.tv-mode .tv-qr { flex-shrink: 0; margin-top: 0.7vw; padding-top: 0.6vw; display: flex; align-items: center; gap: 0.8vw; text-align: left; }
+body.tv-mode .tv-qr img { width: clamp(70px, 6.5vw, 130px); flex-shrink: 0; }
+body.tv-mode .tv-qr .url { margin-top: 0; font-size: clamp(0.6rem, 0.75vw, 1rem); }
+body.tv-mode .tv-qr .hint { font-size: clamp(0.6rem, 0.75vw, 1rem); }
