@@ -72,6 +72,22 @@
       </button>
     </div>
 
+    <div class="card home-onboard" id="home-onboard" hidden>
+      <strong>Erster Start?</strong>
+      <span>Lege unter <em>Spieler</em> eure Namen an – danach könnt ihr ein Spiel starten, und hier erscheinen eure letzten Spiele und die Bestenliste.</span>
+    </div>
+
+    <div class="home-panels" id="home-panels" hidden>
+      <div class="card">
+        <h3 class="panel-title">Zuletzt gespielt</h3>
+        <div class="recent-list" id="home-recent"></div>
+      </div>
+      <div class="card">
+        <h3 class="panel-title">Bestenliste</h3>
+        <div class="leader-list" id="home-leaders"></div>
+      </div>
+    </div>
+
     <div class="home-footer-note">
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18"/></svg>
       Läuft lokal auf diesem Rechner · kein Account, keine Cloud · Handy als Fernbedienung im selben WLAN
@@ -376,6 +392,31 @@
 
     <div class="analytics-tabs" id="stats-player-tabs"></div>
 
+    <div class="stats-toolbar">
+      <div class="segmented" id="stats-period">
+        <button data-period="all" class="active">Gesamt</button>
+        <button data-period="30">30 Tage</button>
+        <button data-period="7">7 Tage</button>
+      </div>
+      <div class="form-pills" id="stats-form"></div>
+    </div>
+
+    <div id="stats-all" hidden>
+      <div class="card" style="margin-bottom:16px;">
+        <h3 class="panel-title">Rangliste</h3>
+        <div style="overflow-x:auto;" id="stats-leaderboard"></div>
+      </div>
+      <div class="card" style="margin-bottom:20px;" id="h2h-card">
+        <h3 class="panel-title">Direktvergleich</h3>
+        <div class="h2h-controls">
+          <select id="h2h-a" class="btn"></select>
+          <span class="h2h-vs">gegen</span>
+          <select id="h2h-b" class="btn"></select>
+        </div>
+        <div id="h2h-result"></div>
+      </div>
+    </div>
+
     <div id="stats-analytics-empty" class="card empty-state" hidden>
       Noch keine gespeicherten Spiele oder Trainings für diesen Spieler.
     </div>
@@ -415,6 +456,7 @@
         <thead><tr><th>Datum</th><th>Modus</th><th>Spieler</th><th>Sieger</th></tr></thead>
         <tbody id="stats-matches-body"></tbody>
       </table>
+      <div style="text-align:center; margin-top:14px;"><button class="btn" id="stats-more-matches" hidden>Mehr anzeigen</button></div>
     </div>
     <div class="card" style="margin-bottom:20px;">
       <h3 style="font-size:1.05rem; margin-bottom:14px;">Trainingseinheiten</h3>

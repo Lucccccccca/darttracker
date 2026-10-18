@@ -154,18 +154,27 @@ function buildLineChartSVG(points, opts = {}) {
   }).join('');
 
   const gradId = `grad-${Math.random().toString(36).slice(2, 9)}`;
+  const grid = [0, 0.5, 1].map((f) => {
+    const y = padTop + innerH - f * innerH;
+    const line = `<line x1="${padX}" x2="${width - padX}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" class="chart-grid"/>`;
+    const label = f > 0 ? `<text x="${width - padX}" y="${(y - 4).toFixed(1)}" text-anchor="end" class="chart-axis-label">${(max * f).toFixed(0)}</text>` : '';
+    return line + label;
+  }).join('');
+  const last = coords[coords.length - 1];
+  const lastLabel = `<text x="${Math.min(last.x, width - 28).toFixed(1)}" y="${Math.max(last.y - 11, 12).toFixed(1)}" text-anchor="middle" class="chart-last">${last.p.average.toFixed(1)}</text>`;
 
-  return `<svg viewBox="0 0 ${width} ${height}" class="chart-svg" preserveAspectRatio="none">
+  return `<svg viewBox="0 0 ${width} ${height}" class="chart-svg">
     <defs>
       <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="${color}" stop-opacity="0.35"/>
         <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
       </linearGradient>
     </defs>
+    ${grid}
     <path d="${areaPath}" fill="url(#${gradId})" stroke="none"/>
     <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
     ${dots}
-    <text x="${padX}" y="12" class="chart-axis-label">Ø ${max.toFixed(0)}</text>
+    ${lastLabel}
     <text x="${padX}" y="${height - 6}" class="chart-axis-label">${new Date(points[0].date).toLocaleDateString('de-DE')}</text>
     <text x="${width - padX}" y="${height - 6}" text-anchor="end" class="chart-axis-label">${new Date(points[points.length - 1].date).toLocaleDateString('de-DE')}</text>
   </svg>`;
