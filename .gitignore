@@ -3,3 +3,4 @@ data/*.json
 !data/.gitkeep
 dist/
 *.log
+.claude/
