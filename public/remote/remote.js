@@ -60,7 +60,11 @@ document.querySelectorAll('.multiplier-row button').forEach((btn) => {
     numpadEl.hidden = mode !== 'numpad';
     boardWrapEl.hidden = mode !== 'board';
     if (mode === 'board' && !boardBuilt) {
-      boardWrapEl.appendChild(createDartboardSVG((value, mult) => throwDart(value, mult)));
+      boardWrapEl.appendChild(createDartboardSVG((value, mult) => throwDart(value, mult), { touch: true }));
+      const hint = document.createElement('div');
+      hint.className = 'db-aim-hint';
+      hint.textContent = 'Finger auf die Scheibe legen, mit der Lupe zielen, loslassen = Wurf. Außerhalb loslassen = abbrechen.';
+      boardWrapEl.appendChild(hint);
       boardBuilt = true;
     }
     try { localStorage.setItem(storageKey, mode); } catch (e) { /* ignore */ }
@@ -78,6 +82,9 @@ document.getElementById('remote-bull50').addEventListener('click', () => throwDa
 document.getElementById('remote-miss').addEventListener('click', () => throwDart(0, 1));
 document.getElementById('remote-undo').addEventListener('click', () => { socket.emit('undo_throw'); buzz(20); });
 document.getElementById('remote-finish-practice').addEventListener('click', () => socket.emit('finish_game'));
+document.getElementById('remote-end-game').addEventListener('click', () => {
+  if (confirm('Spiel jetzt beenden? Der aktuelle Stand wird gewertet und gespeichert.')) { socket.emit('end_match_early'); buzz(20); }
+});
 
 document.addEventListener('pointerdown', (e) => {
   const btn = e.target.closest('.remote-numpad button, .remote-actions .btn, .multiplier-row button');
@@ -214,6 +221,8 @@ function render() {
   const wait = document.getElementById('remote-wait');
   const flow = document.getElementById('remote-flow');
   const finishPractice = document.getElementById('remote-finish-practice');
+  const endGame = document.getElementById('remote-end-game');
+  const undoBtn = document.getElementById('remote-undo');
   const scoreEl = document.getElementById('remote-score');
 
   renderIdentityBar(g);
@@ -239,20 +248,28 @@ function render() {
       : '';
 
     finishPractice.hidden = true;
+    endGame.hidden = g.status === 'finished';
+    undoBtn.hidden = false;
+    undoBtn.disabled = !g.canUndo;
+    document.getElementById('remote-undo-label').textContent =
+      g.status === 'in_progress' && player.turnDarts.length === 0 ? 'Letzten Wurf zurück (Spielerwechsel)' : 'Letzten Wurf zurück';
 
     if (g.status === 'leg_finished' || g.status === 'set_finished' || g.status === 'finished') {
       const s = g.lastLegSummary;
       const winner = g.status === 'finished' ? g.players.find((p) => p.id === g.winnerId) : null;
       flow.innerHTML = g.status === 'finished'
-        ? `<div class="flow-title">${escapeHtml(winner ? winner.name : '')} gewinnt!</div>
-           <button class="btn btn-primary" id="remote-flow-btn">Spiel abschließen</button>`
+        ? `<div class="flow-title">${winner ? escapeHtml(winner.name) + ' gewinnt!' : 'Unentschieden'}</div>
+           <button class="btn btn-primary" id="remote-flow-btn">Speichern &amp; fertig</button>`
         : `<div class="flow-title">${g.status === 'set_finished' ? 'Set' : 'Leg'} für ${escapeHtml(s ? s.winnerName : '')}</div>
-           <button class="btn btn-primary" id="remote-flow-btn">Nächstes Leg</button>`;
+           <button class="btn btn-primary" id="remote-flow-btn">Nächstes Leg</button>
+           <button class="btn btn-ghost" id="remote-flow-undo">Falsch eingegeben? Letzten Wurf zurück</button>`;
       flow.hidden = false;
       document.getElementById('remote-flow-btn').addEventListener('click', () => {
         socket.emit(g.status === 'finished' ? 'finish_game' : 'continue_after_leg');
         buzz(20);
       });
+      const flowUndo = document.getElementById('remote-flow-undo');
+      if (flowUndo) flowUndo.addEventListener('click', () => { socket.emit('undo_throw'); buzz(20); });
       pad.hidden = true;
       wait.hidden = true;
     } else {
@@ -283,6 +300,10 @@ function render() {
     pad.hidden = false;
     pad.classList.remove('locked');
     finishPractice.hidden = false;
+    endGame.hidden = true;
+    undoBtn.hidden = false;
+    undoBtn.disabled = false;
+    document.getElementById('remote-undo-label').textContent = 'Letzten Wurf zurück';
 
     prevSnapshot = { gameId: g.id, playerId: null, score: g.totalPoints, darts: g.turnDarts.length };
   }

@@ -314,7 +314,10 @@ document.getElementById('btn-bull50').addEventListener('click', () => socket.emi
 document.getElementById('btn-miss').addEventListener('click', () => socket.emit('throw', { value: 0, multiplier: 1 }));
 document.getElementById('btn-undo').addEventListener('click', () => socket.emit('undo_throw'));
 document.getElementById('btn-abort-game').addEventListener('click', () => {
-  if (confirm('Spiel wirklich abbrechen? Der Fortschritt geht verloren.')) socket.emit('abort_game');
+  if (confirm('Spiel verwerfen? Es wird nichts gespeichert.')) socket.emit('abort_game');
+});
+document.getElementById('btn-end-game').addEventListener('click', () => {
+  if (confirm('Spiel jetzt beenden? Der aktuelle Stand wird gewertet und gespeichert.')) socket.emit('end_match_early');
 });
 
 document.getElementById('practice-bull25').addEventListener('click', () => socket.emit('throw', { value: 25, multiplier: 1 }));
@@ -391,8 +394,21 @@ function renderGame() {
     `;
     board.appendChild(card);
 
-    if (scored180) showBigFlash('180!', 'gold');
-    else if (busted) showBigFlash('Bust', 'red');
+    const show = document.body.classList.contains('tv-mode');
+    // the dart that was just thrown: still in turnDarts, or (if it ended the turn) last in the new log entry
+    const thrownDart = dartAdded ? p.turnDarts[p.turnDarts.length - 1] : newTurn ? newTurn.darts[newTurn.darts.length - 1] : null;
+    if (thrownDart && show) {
+      showDartFly(thrownDart);
+      playSound(thrownDart.bust ? 'bust' : thrownDart.multiplier === 3 ? 'treble' : 'dart');
+    }
+    if (scored180) { showBigFlash('180!', 'gold', 'Maximum'); playSound('max'); }
+    else if (busted) { showBigFlash('Bust', 'red'); if (!show) playSound('bust'); }
+    else if (newTurn && !newTurn.checkout && show) {
+      const scored = newTurn.scoreBefore - newTurn.scoreAfter;
+      if (scored >= 140) { showBigFlash(String(scored), 'orange', 'Aufnahme'); playSound('ton'); }
+      else if (scored >= 100) { showBigFlash(String(scored), 'gold', 'Aufnahme'); playSound('ton'); }
+      else if (scored >= 60) { showBigFlash(String(scored), 'white', 'Aufnahme'); }
+    }
   });
 
   const log = document.getElementById('turn-log');
@@ -426,15 +442,71 @@ function renderDartSlots(darts, animateLast = false) {
   return html;
 }
 
-function showBigFlash(text, colorClass) {
+function showBigFlash(text, colorClass, sub) {
   const el = document.createElement('div');
   el.className = `big-flash ${colorClass}`;
-  el.textContent = text;
+  el.innerHTML = `<div>${escapeHtml(text)}${sub ? `<span class="bf-sub">${escapeHtml(sub)}</span>` : ''}</div>`;
   document.body.appendChild(el);
   el.addEventListener('animationend', () => el.remove());
   // Fallback: with reduced-motion (no animation → no animationend) or a hidden tab the flash
   // would otherwise stay on screen forever.
   setTimeout(() => el.remove(), 1800);
+}
+
+function showDartFly(dart) {
+  document.querySelectorAll('.dart-fly').forEach((e) => e.remove());
+  const el = document.createElement('div');
+  const kind = dart.value === 25 ? 'bull' : dart.multiplier === 3 ? 'triple' : dart.multiplier === 2 ? 'double' : 'single';
+  el.className = `dart-fly ${kind}`;
+  el.textContent = dart.bust ? `${dart.label} ✕` : dart.label;
+  document.body.appendChild(el);
+  el.addEventListener('animationend', () => el.remove());
+  setTimeout(() => el.remove(), 1200);
+}
+
+// ---- Sounds: synthesized with WebAudio, so no audio files are needed. Only in show mode. ----
+let audioCtx = null;
+let soundEnabled = true;
+try { soundEnabled = localStorage.getItem('darttracker-sound') !== 'off'; } catch (e) { /* ignore */ }
+
+function audio() {
+  if (!audioCtx) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    audioCtx = new Ctx();
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+  return audioCtx;
+}
+
+function tone(ctx, { freq, start, dur, type = 'sine', gain = 0.25, slideTo }) {
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, ctx.currentTime + start);
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, ctx.currentTime + start + dur);
+  g.gain.setValueAtTime(0.0001, ctx.currentTime + start);
+  g.gain.exponentialRampToValueAtTime(gain, ctx.currentTime + start + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
+  o.connect(g).connect(ctx.destination);
+  o.start(ctx.currentTime + start);
+  o.stop(ctx.currentTime + start + dur + 0.05);
+}
+
+function playSound(name) {
+  if (!soundEnabled || !document.body.classList.contains('tv-mode')) return;
+  const ctx = audio();
+  if (!ctx) return;
+  switch (name) {
+    case 'dart': tone(ctx, { freq: 170, start: 0, dur: 0.09, type: 'triangle', gain: 0.35, slideTo: 60 }); break;
+    case 'treble': tone(ctx, { freq: 170, start: 0, dur: 0.09, type: 'triangle', gain: 0.35, slideTo: 60 }); tone(ctx, { freq: 880, start: 0.03, dur: 0.12, gain: 0.12 }); break;
+    case 'bust': tone(ctx, { freq: 220, start: 0, dur: 0.35, type: 'sawtooth', gain: 0.18, slideTo: 70 }); break;
+    case 'ton': [523, 659, 784].forEach((f, i) => tone(ctx, { freq: f, start: i * 0.09, dur: 0.22, gain: 0.18 })); break;
+    case 'max': [523, 659, 784, 1047, 1319].forEach((f, i) => tone(ctx, { freq: f, start: i * 0.08, dur: 0.3, type: 'square', gain: 0.12 })); break;
+    case 'checkout': [392, 523, 659, 784].forEach((f, i) => tone(ctx, { freq: f, start: i * 0.11, dur: 0.4, gain: 0.2 })); tone(ctx, { freq: 1047, start: 0.46, dur: 0.7, gain: 0.2 }); break;
+    case 'win': [392, 523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => tone(ctx, { freq: f, start: i * 0.12, dur: 0.35, gain: 0.2 })); tone(ctx, { freq: 1568, start: 0.98, dur: 1.1, gain: 0.22 }); break;
+    default: break;
+  }
 }
 
 function launchConfetti(container) {
@@ -474,6 +546,7 @@ function handleLegAndMatchOverlays(g, prev) {
       lastLegOverlayKey = key;
       if (justHappened) {
         showBigFlash(g.status === 'set_finished' ? 'Set!' : 'Checkout!', 'gold');
+        playSound('checkout');
         setTimeout(() => launchConfetti(legOverlay), 250);
       }
       const summary = g.lastLegSummary;
@@ -495,15 +568,21 @@ function handleLegAndMatchOverlays(g, prev) {
     matchOverlay.hidden = false;
     if (!lastMatchOverlayShown) {
       lastMatchOverlayShown = true;
-      if (justHappened) {
+      if (justHappened && !g.endedEarly) {
         showBigFlash('Game Shot!', 'gold');
+        playSound('win');
         setTimeout(() => launchConfetti(matchOverlay), 250);
       }
       const winner = g.players.find((p) => p.id === g.winnerId);
-      document.getElementById('match-winner-name').textContent = winner ? winner.name : '';
-      document.getElementById('match-summary').innerHTML = g.players.map((p) =>
-        `${escapeHtml(p.name)}: ${p.legsWon} Legs${g.setsToWin > 1 ? `, ${p.setsWon} Sets` : ''} · Ø ${p.average.toFixed(1)} · Highscore ${p.highestTurn}${p.highestCheckout ? ` · Bestes Checkout ${p.highestCheckout}` : ''}`
-      ).join('<br/>');
+      const trophy = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="var(--gold)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 5H4a3 3 0 0 0 3 5"/><path d="M17 5h3a3 3 0 0 1-3 5"/><path d="M12 13v3"/><path d="M9 20h6"/><path d="M10 17h4l.6 3H9.4l.6-3Z"/></svg>';
+      document.getElementById('match-overlay-title').innerHTML = winner
+        ? `${trophy} ${escapeHtml(winner.name)} gewinnt!`
+        : 'Unentschieden';
+      document.getElementById('match-summary').innerHTML =
+        (g.endedEarly ? '<div style="margin-bottom:8px;">Vorzeitig beendet – Stand wird gewertet.</div>' : '') +
+        g.players.map((p) =>
+          `${escapeHtml(p.name)}: ${p.legsWon} Legs${g.setsToWin > 1 ? `, ${p.setsWon} Sets` : ''} · Ø ${p.average.toFixed(1)} · Highscore ${p.highestTurn}${p.highestCheckout ? ` · Bestes Checkout ${p.highestCheckout}` : ''}`
+        ).join('<br/>');
     }
   } else {
     matchOverlay.hidden = true;
@@ -512,6 +591,8 @@ function handleLegAndMatchOverlays(g, prev) {
 }
 
 document.getElementById('leg-overlay-continue').addEventListener('click', () => socket.emit('continue_after_leg'));
+document.getElementById('leg-overlay-undo').addEventListener('click', () => socket.emit('undo_throw'));
+document.getElementById('match-overlay-undo').addEventListener('click', () => socket.emit('undo_throw'));
 document.getElementById('match-finished-close').addEventListener('click', () => socket.emit('finish_game'));
 
 // ---------------------------------------------------------------------------
@@ -781,9 +862,23 @@ document.getElementById('overlay-remote-close').addEventListener('click', () => 
 // TV mode (fullscreen scoreboard, phones do the input)
 // ---------------------------------------------------------------------------
 
+function renderSoundButton() {
+  document.getElementById('btn-sound-label').textContent = soundEnabled ? 'Sound an' : 'Sound aus';
+  document.getElementById('btn-sound').style.opacity = soundEnabled ? '' : '0.6';
+}
+
+document.getElementById('btn-sound').addEventListener('click', () => {
+  soundEnabled = !soundEnabled;
+  try { localStorage.setItem('darttracker-sound', soundEnabled ? 'on' : 'off'); } catch (e) { /* ignore */ }
+  renderSoundButton();
+  if (soundEnabled) playSound('ton');
+});
+
 function enterTvMode() {
   document.body.classList.add('tv-mode');
-  document.getElementById('btn-tv-exit').hidden = false;
+  document.getElementById('show-bar').hidden = false;
+  renderSoundButton();
+  audio();
   socket.emit('get_remote_url', (res) => {
     if (res.qr) document.getElementById('tv-qr-img').src = res.qr;
     document.getElementById('tv-qr-url').textContent = res.url;
@@ -796,7 +891,7 @@ function enterTvMode() {
 
 function exitTvMode() {
   document.body.classList.remove('tv-mode');
-  document.getElementById('btn-tv-exit').hidden = true;
+  document.getElementById('show-bar').hidden = true;
   if (document.fullscreenElement && document.exitFullscreen) {
     document.exitFullscreen().catch(() => { /* ignore */ });
   }

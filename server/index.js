@@ -205,6 +205,13 @@ function createServer() {
       }
     });
 
+    socket.on('end_match_early', () => {
+      if (currentGame && currentGame.mode === 'x01') {
+        currentGame.endEarly();
+        broadcastState();
+      }
+    });
+
     socket.on('finish_game', () => {
       if (!currentGame) return;
       if (currentGame.mode === 'x01') {

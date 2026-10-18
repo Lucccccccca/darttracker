@@ -101,18 +101,39 @@ class X01Match {
     this.activePlayerIndex = 0;
     this.status = 'in_progress'; // in_progress | leg_finished | set_finished | finished
     this.winnerId = null;
+    this.endedEarly = false;
     this.lastLegSummary = null;
     this.legHistory = [];
+    this._history = [];
   }
 
   get activePlayer() {
     return this.players[this.activePlayerIndex];
   }
 
+  // Undo works by restoring whole snapshots: a wrong dart can then be taken back even after
+  // it ended the turn (player switch), busted, or won the leg — every mutation is reversible.
+  _pushHistory() {
+    const { _history, ...state } = this;
+    this._history.push(JSON.parse(JSON.stringify(state)));
+    if (this._history.length > 300) this._history.shift();
+  }
+
+  get canUndo() {
+    return this._history.length > 0;
+  }
+
+  undoThrow() {
+    const snapshot = this._history.pop();
+    if (!snapshot) return;
+    Object.assign(this, snapshot);
+  }
+
   throwDart(value, multiplier) {
     if (this.status !== 'in_progress') return;
     const player = this.activePlayer;
     if (player.turnDarts.length >= 3) return;
+    this._pushHistory();
 
     const points = value * multiplier;
     const isDoubleDart = multiplier === 2;
@@ -151,23 +172,6 @@ class X01Match {
 
     if (player.turnDarts.length === 3) {
       this._endTurn(player, { bust: false });
-    }
-  }
-
-  undoThrow() {
-    if (this.status !== 'in_progress') return;
-    const player = this.activePlayer;
-    if (player.turnDarts.length === 0) return;
-    const last = player.turnDarts.pop();
-    if (!last.bust) {
-      player.currentScore += last.points;
-    }
-    if (player.hasDoubledIn && this.doubleIn) {
-      // Recompute doubledIn state from remaining darts this turn (rare edge case).
-      const stillDoubled = player.turnDarts.some((d) => d.multiplier === 2 && !d.bust);
-      if (!stillDoubled && !player.turnDarts.length) {
-        // Only reset if no prior turns already doubled in - simplest safe default: leave as-is.
-      }
     }
   }
 
@@ -245,6 +249,7 @@ class X01Match {
   /** Called after leg_finished / set_finished acknowledgement to start the next leg. */
   continueAfterLeg() {
     if (this.status === 'finished') return;
+    this._pushHistory();
     const startingNewSet = this.status === 'set_finished';
     this.legStarterIndex = (this.legStarterIndex + 1) % this.players.length;
     this.activePlayerIndex = this.legStarterIndex;
@@ -264,6 +269,18 @@ class X01Match {
       this.legNumber += 1;
     }
     this.status = 'in_progress';
+  }
+
+  /** Ends the match now; whoever leads on sets, then legs, wins — a tie is a draw (no winner). */
+  endEarly() {
+    if (this.status === 'finished') return;
+    this._pushHistory();
+    const ranked = this.players.slice().sort((a, b) => b.setsWon - a.setsWon || b.legsWon - a.legsWon);
+    const top = ranked[0];
+    const tied = ranked.length > 1 && ranked[1].setsWon === top.setsWon && ranked[1].legsWon === top.legsWon;
+    this.winnerId = tied ? null : top.id;
+    this.endedEarly = true;
+    this.status = 'finished';
   }
 
   checkoutSuggestionFor(player) {
@@ -287,6 +304,8 @@ class X01Match {
       activePlayerIndex: this.activePlayerIndex,
       status: this.status,
       winnerId: this.winnerId,
+      endedEarly: this.endedEarly,
+      canUndo: this.canUndo,
       lastLegSummary: this.lastLegSummary,
       legHistory: this.legHistory,
       players: this.players.map((p) => ({
@@ -299,10 +318,13 @@ class X01Match {
 
   static fromJSON(data) {
     const match = Object.create(X01Match.prototype);
-    Object.assign(match, data);
+    const { canUndo, ...fields } = data;
+    Object.assign(match, fields);
     // toJSON() adds derived fields (average, checkoutSuggestion) to player copies;
     // strip them back off so we resume from clean internal state.
     match.players = data.players.map(({ average, checkoutSuggestion, ...rest }) => rest);
+    match.endedEarly = !!data.endedEarly;
+    match._history = [];
     return match;
   }
 
@@ -319,6 +341,7 @@ class X01Match {
       doubleOut: this.doubleOut,
       doubleIn: this.doubleIn,
       winnerId: this.winnerId,
+      endedEarly: this.endedEarly,
       legHistory: this.legHistory,
       players: json.players.map((p) => ({
         id: p.id,
