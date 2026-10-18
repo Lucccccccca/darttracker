@@ -32,7 +32,11 @@
     .remote-dart-slots { display: flex; gap: 10px; justify-content: center; margin: 10px 0 14px; }
     .remote-dart-slots .dart-slot { width: 66px; height: 48px; font-size: 1.05rem; }
     .remote-checkout { text-align: center; border-radius: var(--radius-sm); padding: 12px; min-height: 1.3em; margin-bottom: 18px; }
-    .remote-checkout:not(:empty) { background: var(--gold-dim); border: 1px solid #6b5220; animation: checkout-glow 1.8s ease-in-out infinite; }
+    .remote-checkout:not(:empty) { position: relative; background: var(--gold-dim); border: 1px solid #6b5220; }
+    .remote-checkout:not(:empty)::after {
+      content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0;
+      box-shadow: 0 0 22px 2px rgba(255, 176, 32, 0.45); animation: glow-pulse 1.8s ease-in-out infinite; will-change: opacity;
+    }
     .remote-checkout .co-label { display: block; font-size: 0.68rem; letter-spacing: 0.08em; color: var(--text-dim); font-weight: 700; }
     .remote-checkout .co-value { font-family: var(--font-display); color: var(--gold); font-size: 1.15rem; font-weight: 700; }
     .remote-pad { position: relative; transition: opacity 0.2s; }

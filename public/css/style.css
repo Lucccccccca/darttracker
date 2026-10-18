@@ -444,13 +444,18 @@ th { color: var(--text-dim); font-weight: 700; font-size: 0.72rem; letter-spacin
   60% { transform: translateX(6px); }
   75% { transform: translateX(-3px); }
 }
-@keyframes bust-flash {
-  0% { background-color: rgba(255, 65, 54, 0.35); }
-  100% { background-color: transparent; }
+/* Everything below animates only transform/opacity, which the GPU can do without repainting. */
+@keyframes flash-out {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
 }
-@keyframes pulse-ring {
-  0% { box-shadow: 0 0 0 0 rgba(255, 65, 54, 0.6); }
-  100% { box-shadow: 0 0 0 30px rgba(255, 65, 54, 0); }
+@keyframes ring-out {
+  0% { transform: scale(1); opacity: 0.75; }
+  100% { transform: scale(1.1); opacity: 0; }
+}
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
 }
 @keyframes badge-in {
   from { transform: translateY(-10px) scale(0.8); opacity: 0; }
@@ -463,10 +468,6 @@ th { color: var(--text-dim); font-weight: 700; font-size: 0.72rem; letter-spacin
 @keyframes overlay-in {
   from { opacity: 0; transform: scale(0.82); }
   to { opacity: 1; transform: none; }
-}
-@keyframes checkout-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 176, 32, 0); }
-  50% { box-shadow: 0 0 26px 2px rgba(255, 176, 32, 0.45); }
 }
 @keyframes confetti-fall {
   0% { transform: translate3d(0, 0, 0) rotate(0); opacity: 1; }
@@ -482,11 +483,22 @@ th { color: var(--text-dim); font-weight: 700; font-size: 0.72rem; letter-spacin
 .view-enter { animation: fade-up 0.28s ease; }
 .player-card .score.score-pop { animation: score-pop 0.55s cubic-bezier(0.2, 0.8, 0.2, 1); display: block; }
 .dart-slot.dart-in { animation: dart-in 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); }
-.player-card.bust-shake { animation: bust-shake 0.6s ease, bust-flash 0.9s ease; }
-.player-card.active-in { animation: pulse-ring 0.9s ease-out; }
+.player-card.bust-shake { animation: bust-shake 0.6s ease; }
+.player-card.bust-shake::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; background: rgba(255, 65, 54, 0.35);
+  pointer-events: none; animation: flash-out 0.9s ease forwards;
+}
+.player-card.active-in::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; border: 2px solid var(--accent);
+  pointer-events: none; animation: ring-out 0.9s ease-out forwards;
+}
 .player-card.active-in .active-badge { animation: badge-in 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.3); }
 .turn-log-entry.new-entry { animation: fade-up 0.4s ease; }
-.checkout-suggestion:not(:empty) { animation: checkout-glow 1.8s ease-in-out infinite; }
+.checkout-suggestion:not(:empty) { position: relative; }
+.checkout-suggestion:not(:empty)::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0;
+  box-shadow: 0 0 26px 2px rgba(255, 176, 32, 0.45); animation: glow-pulse 1.8s ease-in-out infinite; will-change: opacity;
+}
 .overlay:not([hidden]) .overlay-card { animation: overlay-in 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.2); }
 .numpad-grid button, .btn, .multiplier-row button, .stepper-btn { transition: transform 0.08s ease, background 0.15s, border-color 0.15s; }
 .numpad-grid button.pressed, .btn.pressed { transform: scale(0.9); }
@@ -494,7 +506,7 @@ th { color: var(--text-dim); font-weight: 700; font-size: 0.72rem; letter-spacin
 
 .confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 .confetti span {
-  position: absolute; top: -12px; width: 10px; height: 16px; border-radius: 2px;
+  position: absolute; top: -12px; width: 10px; height: 16px; border-radius: 2px; will-change: transform, opacity;
   animation: confetti-fall var(--dur) cubic-bezier(0.25, 0.6, 0.4, 1) var(--delay) forwards;
 }
 
@@ -502,7 +514,7 @@ th { color: var(--text-dim); font-weight: 700; font-size: 0.72rem; letter-spacin
   position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
   pointer-events: none; z-index: 60; font-family: var(--font-display); font-weight: 700;
   font-size: clamp(3rem, 12vw, 12rem); text-transform: uppercase; letter-spacing: 0.04em;
-  text-shadow: 0 10px 60px rgba(0, 0, 0, 0.8); animation: big-flash 1.4s ease forwards;
+  text-shadow: 0 6px 26px rgba(0, 0, 0, 0.7); animation: big-flash 1.4s ease forwards; will-change: transform, opacity;
 }
 .big-flash.gold { color: var(--gold); }
 .big-flash.red { color: var(--accent); }
@@ -559,24 +571,27 @@ th { color: var(--text-dim); font-weight: 700; font-size: 0.72rem; letter-spacin
   opacity: 0.3; transition: opacity 0.2s;
 }
 .show-bar:hover { opacity: 1; }
-body.tv-mode .topbar, body.tv-mode .numpad-wrap, body.tv-mode #btn-abort-game,
+body.tv-mode .topbar, body.tv-mode #btn-abort-game,
 body.tv-mode #btn-end-game, body.tv-mode #btn-tv-mode { display: none !important; }
+/* Input panel is moved off-screen, not display:none — a hidden <video> can stop delivering frames,
+   and the webcam dart detection has to keep running while the TV shows the scoreboard. */
+body.tv-mode .numpad-wrap { position: fixed; left: -10000px; top: 0; width: 520px; pointer-events: none; }
 body.tv-mode { overflow: hidden; }
 body.tv-mode::before {
-  content: ''; position: fixed; inset: -10vh -10vw; pointer-events: none; z-index: 0;
+  content: ''; position: fixed; inset: -10vh -10vw; pointer-events: none; z-index: 0; will-change: transform, opacity;
   background:
     radial-gradient(55vw 55vh at 50% 115%, rgba(255, 65, 54, 0.22), transparent 62%),
     radial-gradient(40vw 40vh at 8% -10%, rgba(255, 176, 32, 0.12), transparent 60%);
   animation: stage-breathe 7s ease-in-out infinite;
 }
 body.tv-mode::after {
-  content: ''; position: fixed; top: -20vh; left: 0; width: 18vw; height: 140vh; pointer-events: none; z-index: 0;
+  content: ''; position: fixed; top: -20vh; left: 0; width: 18vw; height: 140vh; pointer-events: none; z-index: 0; will-change: transform;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.035), transparent);
   animation: spotlight-sweep 11s linear infinite;
 }
 body.tv-mode main.view { position: relative; z-index: 1; max-width: none; padding: 2.5vw 3.5vw; }
 body.tv-mode .scoreboard { grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); align-items: center; }
-body.tv-mode .player-card { transition: transform 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.1), border-color 0.3s, box-shadow 0.3s; }
+body.tv-mode .player-card { transition: transform 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.1), opacity 0.3s, border-color 0.3s; }
 body.tv-mode .player-card.active { transform: scale(1.05); z-index: 2; box-shadow: 0 0 0 1px rgba(255, 65, 54, 0.3), 0 30px 80px -20px rgba(255, 65, 54, 0.6); }
 body.tv-mode .player-card:not(.active) { transform: scale(0.94); opacity: 0.8; }
 body.tv-mode .overlay { background: rgba(9, 10, 12, 0.86); }
@@ -589,8 +604,8 @@ body.tv-mode .overlay-card .btn-lg { font-size: clamp(1rem, 1.6vw, 2rem); paddin
 .dart-fly {
   position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 58; pointer-events: none;
   font-family: var(--font-display); font-weight: 700; color: #fff; letter-spacing: 0.02em;
-  font-size: clamp(4rem, 15vw, 17rem); text-shadow: 0 14px 70px rgba(0, 0, 0, 0.85), 0 0 40px rgba(255, 65, 54, 0.35);
-  animation: dart-fly 0.95s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+  font-size: clamp(4rem, 15vw, 17rem); text-shadow: 0 8px 28px rgba(0, 0, 0, 0.75);
+  animation: dart-fly 0.95s cubic-bezier(0.2, 0.9, 0.3, 1) forwards; will-change: transform, opacity;
 }
 .dart-fly.triple { color: var(--accent); }
 .dart-fly.double { color: var(--green); }
@@ -601,6 +616,20 @@ body.tv-mode .overlay-card .btn-lg { font-size: clamp(1rem, 1.6vw, 2rem); paddin
 }
 .big-flash.orange { color: #ff8a3d; }
 .big-flash.white { color: var(--text); }
+
+/* ---- Lite effects: auto-enabled on slow machines (or chosen in the show bar). Same look, no
+   full-screen animated layers, no big blurred shadows, no scale transitions. ---- */
+body.lite::before { animation: none !important; opacity: 0.7; will-change: auto; }
+body.lite::after { display: none !important; }
+body.lite .player-card, body.lite .player-card.active { box-shadow: none !important; }
+body.lite.tv-mode .player-card { transition: none; }
+body.lite.tv-mode .player-card:not(.active) { opacity: 1; }
+body.lite .player-card.active-in::after, body.lite .player-card.bust-shake::before,
+body.lite .checkout-suggestion:not(:empty)::after { display: none; }
+body.lite .big-flash, body.lite .dart-fly { text-shadow: none; }
+body.lite .overlay { background: rgba(9, 10, 12, 0.95); }
+body.lite .overlay-card { animation-duration: 0.18s !important; box-shadow: none; }
+body.lite .update-banner, body.lite .db-lens { box-shadow: none; }
 
 /* ---- Camera detection ---- */
 .camera-layout { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(220px, 1fr); gap: 18px; align-items: start; }

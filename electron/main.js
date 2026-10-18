@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const { app, BrowserWindow, Menu, dialog, ipcMain, session } = require('electron');
 const { autoUpdater } = require('electron-updater');
@@ -7,9 +8,19 @@ const { autoUpdater } = require('electron-updater');
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4848;
 let mainWindow = null;
 
-// Avoids GPU-process crash loops on machines/VMs with flaky hardware acceleration
-// (the app is a simple scoreboard UI — it doesn't need GPU compositing).
-app.disableHardwareAcceleration();
+// GPU compositing is what keeps the show-mode animations smooth on an older PC, so it stays ON.
+// If the GPU process ever crashes on a machine (flaky driver), the app remembers that, restarts
+// itself once and from then on runs in software mode — safe, just less smooth.
+const GPU_FLAG = path.join(app.getPath('userData'), 'disable-gpu.flag');
+const gpuDisabled = fs.existsSync(GPU_FLAG);
+if (gpuDisabled) app.disableHardwareAcceleration();
+
+app.on('child-process-gone', (_event, details) => {
+  if (details.type !== 'GPU' || gpuDisabled || details.reason === 'clean-exit') return;
+  try { fs.writeFileSync(GPU_FLAG, `GPU process ${details.reason} at ${new Date().toISOString()}\n`); } catch (e) { /* ignore */ }
+  app.relaunch();
+  app.exit(0);
+});
 
 // In a packaged build the source lives inside a read-only app.asar archive, so the server's
 // default (next to its own files) can't be written to. Point it at a real per-user folder
@@ -34,6 +45,7 @@ if (!gotLock) {
     session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
       callback(permission === 'media' || permission === 'fullscreen');
     });
+    session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media' || permission === 'fullscreen');
     let port;
     try {
       ({ port } = await startServer(PORT));

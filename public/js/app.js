@@ -352,21 +352,85 @@ function snapshotGame(g) {
   };
 }
 
+// ---- In-place scoreboard: cards live as long as the game does, and only what changed is touched.
+// Rebuilding the DOM on every throw (as before) cost layout + paint each time and made CSS
+// transitions impossible, which is what made show mode stutter on slower PCs.
+let gameCards = [];
+let gameCardsKey = null;
+let turnLogSignature = null;
+
+function restartAnim(el, cls, ms) {
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+  el._animTimers = el._animTimers || {};
+  clearTimeout(el._animTimers[cls]);
+  el._animTimers[cls] = setTimeout(() => el.classList.remove(cls), ms);
+}
+
+function setText(entry, key, el, value) {
+  if (entry.cache[key] === value) return;
+  entry.cache[key] = value;
+  el.textContent = value;
+}
+
+function setHtml(entry, key, el, html) {
+  if (entry.cache[key] === html) return false;
+  entry.cache[key] = html;
+  el.innerHTML = html;
+  return true;
+}
+
+function buildCard() {
+  const el = document.createElement('div');
+  el.className = 'player-card';
+  el.innerHTML = `
+    <span class="active-badge" hidden>AM WURF</span>
+    <div class="name-row"><span class="name"></span><span class="avg"></span></div>
+    <div class="score"></div>
+    <div class="legs-sets"><span class="badge legs"></span><span class="badge sets" hidden></span></div>
+    <div class="dart-slots"></div>
+    <div class="checkout-suggestion"></div>`;
+  return {
+    el,
+    cache: {},
+    badge: el.querySelector('.active-badge'),
+    name: el.querySelector('.name'),
+    avg: el.querySelector('.avg'),
+    score: el.querySelector('.score'),
+    legs: el.querySelector('.legs'),
+    sets: el.querySelector('.sets'),
+    slots: el.querySelector('.dart-slots'),
+    checkout: el.querySelector('.checkout-suggestion'),
+  };
+}
+
 function renderGame() {
   const g = latestState.game;
   if (!g || g.mode !== 'x01') return;
 
   const prev = prevGameSnapshot && prevGameSnapshot.id === g.id ? prevGameSnapshot : null;
   const sameLeg = prev && prev.legNumber === g.legNumber;
+  const show = document.body.classList.contains('tv-mode');
 
-  document.getElementById('game-meta-leg').textContent =
-    `Leg ${g.legNumber}${g.setsToWin > 1 ? ` · Set ${g.setNumber}` : ''}`;
-  document.getElementById('game-meta-sub').textContent =
-    `${g.startScore} · ${g.doubleOut ? 'Doppel-Out' : 'Einfach-Out'}${g.doubleIn ? ' · Doppel-In' : ''}`;
+  const legText = `Leg ${g.legNumber}${g.setsToWin > 1 ? ` · Set ${g.setNumber}` : ''}`;
+  const subText = `${g.startScore} · ${g.doubleOut ? 'Doppel-Out' : 'Einfach-Out'}${g.doubleIn ? ' · Doppel-In' : ''}`;
+  const legEl = document.getElementById('game-meta-leg');
+  const subEl = document.getElementById('game-meta-sub');
+  if (legEl.textContent !== legText) legEl.textContent = legText;
+  if (subEl.textContent !== subText) subEl.textContent = subText;
 
   const board = document.getElementById('scoreboard');
-  board.innerHTML = '';
+  const key = `${g.id}:${g.players.length}`;
+  if (gameCardsKey !== key) {
+    board.innerHTML = '';
+    gameCards = g.players.map(() => buildCard());
+    gameCards.forEach((c) => board.appendChild(c.el));
+    gameCardsKey = key;
+  }
+
   g.players.forEach((p, idx) => {
+    const c = gameCards[idx];
     const isActive = idx === g.activePlayerIndex;
     const pp = prev ? prev.players[idx] : null;
     const scoreChanged = !!pp && sameLeg && pp.score !== p.currentScore;
@@ -376,28 +440,29 @@ function renderGame() {
     const becameActive = !!prev && isActive && prev.activePlayerIndex !== idx;
     const scored180 = !!newTurn && !newTurn.bust && !newTurn.checkout && newTurn.scoreBefore - newTurn.scoreAfter === 180;
 
-    const card = document.createElement('div');
-    card.className = 'player-card' + (isActive ? ' active' : '') + (busted ? ' bust-shake' : '') + (becameActive ? ' active-in' : '');
+    c.el.classList.toggle('active', isActive);
+    c.badge.hidden = !isActive;
+    if (becameActive) restartAnim(c.el, 'active-in', 1000);
+    if (busted) restartAnim(c.el, 'bust-shake', 1000);
+
+    setText(c, 'name', c.name, p.name);
+    setText(c, 'avg', c.avg, `Ø ${p.average.toFixed(1)}`);
+    setText(c, 'score', c.score, String(p.currentScore));
+    if (scoreChanged) restartAnim(c.score, 'score-pop', 600);
 
     const legDots = Array.from({ length: g.legsToWin }, (_, i) => i < p.legsWon ? '●' : '○').join(' ');
+    setText(c, 'legs', c.legs, `Legs ${legDots}`);
+    c.sets.hidden = g.setsToWin <= 1;
+    if (g.setsToWin > 1) setText(c, 'sets', c.sets, `Sets ${p.setsWon}/${g.setsToWin}`);
 
-    card.innerHTML = `
-      ${isActive ? '<span class="active-badge">AM WURF</span>' : ''}
-      <div class="name-row">
-        <span class="name">${escapeHtml(p.name)}</span>
-        <span class="avg">Ø ${p.average.toFixed(1)}</span>
-      </div>
-      <div class="score${scoreChanged ? ' score-pop' : ''}">${p.currentScore}</div>
-      <div class="legs-sets">
-        <span class="badge">Legs ${legDots}</span>
-        ${g.setsToWin > 1 ? `<span class="badge">Sets ${p.setsWon}/${g.setsToWin}</span>` : ''}
-      </div>
-      <div class="dart-slots">${renderDartSlots(p.turnDarts, dartAdded)}</div>
-      <div class="checkout-suggestion">${isActive ? formatCheckout(p.checkoutSuggestion) : ''}</div>
-    `;
-    board.appendChild(card);
+    const slotsChanged = setHtml(c, 'slots', c.slots, renderDartSlots(p.turnDarts, false));
+    if (slotsChanged && dartAdded) {
+      const filled = c.slots.querySelectorAll('.dart-slot.filled');
+      if (filled.length) filled[filled.length - 1].classList.add('dart-in');
+    }
 
-    const show = document.body.classList.contains('tv-mode');
+    setHtml(c, 'checkout', c.checkout, isActive ? formatCheckout(p.checkoutSuggestion) : '');
+
     // the dart that was just thrown: still in turnDarts, or (if it ended the turn) last in the new log entry
     const thrownDart = dartAdded ? p.turnDarts[p.turnDarts.length - 1] : newTurn ? newTurn.darts[newTurn.darts.length - 1] : null;
     if (thrownDart && show) {
@@ -414,12 +479,11 @@ function renderGame() {
     }
   });
 
-  const log = document.getElementById('turn-log');
-  log.innerHTML = g.players.map((p, idx) => {
+  const buildLog = (markNew) => g.players.map((p, idx) => {
     const pp = prev ? prev.players[idx] : null;
-    const entries = p.turnLog.slice(-6).reverse().map((t, i) => {
+    return p.turnLog.slice(-6).reverse().map((t, i) => {
       const cls = t.bust ? 'bust' : t.checkout ? 'checkout' : '';
-      const isNew = i === 0 && !!pp && p.turnLog.length > pp.turns;
+      const isNew = markNew && i === 0 && !!pp && p.turnLog.length > pp.turns;
       const dartsStr = t.darts.map((d) => d.label).join(' ');
       const resultStr = t.bust ? 'BUST' : t.checkout ? `CHECKOUT ${t.scoreBefore}` : `${t.scoreBefore} → ${t.scoreAfter}`;
       return `<div class="turn-log-entry ${cls}${isNew ? ' new-entry' : ''}">
@@ -427,8 +491,13 @@ function renderGame() {
         <div class="result">${resultStr}</div>
       </div>`;
     }).join('');
-    return entries;
   }).join('') || '<div class="empty-state">Noch keine Würfe</div>';
+
+  const signature = buildLog(false);
+  if (signature !== turnLogSignature) {
+    turnLogSignature = signature;
+    document.getElementById('turn-log').innerHTML = buildLog(true);
+  }
 
   handleLegAndMatchOverlays(g, prev);
   prevGameSnapshot = snapshotGame(g);
@@ -513,11 +582,68 @@ function playSound(name) {
   }
 }
 
+// ---- Effects level: 'auto' measures real frame rate in show mode, 'lite'/'full' force it ----
+let fxPref = 'auto';
+try { fxPref = localStorage.getItem('darttracker-fx') || 'auto'; } catch (e) { /* ignore */ }
+let fxMeasureToken = 0;
+
+function isLite() { return document.body.classList.contains('lite'); }
+
+function renderFxButton() {
+  const label = fxPref === 'lite' ? 'Effekte: Sparsam' : fxPref === 'full' ? 'Effekte: Voll' : (isLite() ? 'Effekte: Auto (sparsam)' : 'Effekte: Auto');
+  document.getElementById('btn-fx').textContent = label;
+}
+
+/** Average fps and share of slow frames while the stage animations run. null if the tab is hidden. */
+function measureFps(durationMs) {
+  return new Promise((resolve) => {
+    if (document.hidden) { resolve(null); return; }
+    const stamps = [];
+    const t0 = performance.now();
+    // rAF stops entirely when the window is covered/minimized — don't wait forever
+    setTimeout(() => resolve(null), durationMs + 2500);
+    const step = (t) => {
+      stamps.push(t);
+      if (document.hidden) { resolve(null); return; } // minimized / covered: numbers would be meaningless
+      if (t - t0 < durationMs) requestAnimationFrame(step);
+      else {
+        let slow = 0;
+        for (let i = 1; i < stamps.length; i++) if (stamps[i] - stamps[i - 1] > 34) slow++;
+        const frames = stamps.length - 1;
+        resolve(frames > 5 ? { fps: (frames * 1000) / (stamps[stamps.length - 1] - stamps[0]), slowShare: slow / frames } : null);
+      }
+    };
+    requestAnimationFrame(step);
+  });
+}
+
+async function applyFxPreference() {
+  const token = ++fxMeasureToken;
+  if (fxPref === 'lite') document.body.classList.add('lite');
+  else if (fxPref === 'full') document.body.classList.remove('lite');
+  else {
+    document.body.classList.remove('lite');
+    renderFxButton();
+    await new Promise((r) => setTimeout(r, 700)); // let the show layout settle first
+    const m = await measureFps(2200);
+    if (token !== fxMeasureToken || fxPref !== 'auto') return;
+    if (m && (m.fps < 46 || m.slowShare > 0.2)) document.body.classList.add('lite');
+  }
+  renderFxButton();
+}
+
+document.getElementById('btn-fx').addEventListener('click', () => {
+  fxPref = fxPref === 'auto' ? 'lite' : fxPref === 'lite' ? 'full' : 'auto';
+  try { localStorage.setItem('darttracker-fx', fxPref); } catch (e) { /* ignore */ }
+  applyFxPreference();
+});
+
 function launchConfetti(container) {
   const colors = ['#ff4136', '#ffb020', '#2fae6b', '#f5f3ef', '#ff8a3d'];
   const wrap = document.createElement('div');
   wrap.className = 'confetti';
-  for (let i = 0; i < 70; i++) {
+  const count = isLite() ? 26 : 60;
+  for (let i = 0; i < count; i++) {
     const s = document.createElement('span');
     s.style.left = `${50 + (Math.random() * 40 - 20)}%`;
     s.style.background = colors[i % colors.length];
@@ -1097,6 +1223,7 @@ function enterTvMode() {
   document.body.classList.add('tv-mode');
   document.getElementById('show-bar').hidden = false;
   renderSoundButton();
+  applyFxPreference();
   audio();
   socket.emit('get_remote_url', (res) => {
     if (res.qr) document.getElementById('tv-qr-img').src = res.qr;
