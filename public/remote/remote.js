@@ -13,17 +13,39 @@ try { identity = localStorage.getItem(IDENTITY_KEY) || ''; } catch (e) { /* igno
 let setupSelectedIds = [];
 let setupScore = 501;
 let setupLegs = 3;
+let setupMode = 'x01';
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+
+const MODE_LABELS = { x01: 'X01', cricket: 'Cricket', atc: 'Rund um die Uhr' };
+
+// socket.io would queue emits while offline and fire them on reconnect — for a scoring app that
+// means stale darts landing on the wrong player. Refuse instead, and say so.
+function send(...args) {
+  if (!socket.connected) { buzz(90); flashConnection(); return false; }
+  socket.emit(...args);
+  return true;
+}
+
+function flashConnection() {
+  const b = document.getElementById('conn-banner');
+  b.hidden = false;
+  b.classList.remove('shake');
+  void b.offsetWidth;
+  b.classList.add('shake');
+}
+
+socket.on('disconnect', () => { document.getElementById('conn-banner').hidden = false; render(); });
+socket.on('connect', () => { document.getElementById('conn-banner').hidden = true; });
 
 function buzz(ms = 12) {
   try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* ignore */ }
 }
 
 function throwDart(value, mult) {
-  socket.emit('throw', { value, multiplier: mult });
+  send('throw', { value, multiplier: mult });
   buzz();
 }
 
@@ -80,10 +102,10 @@ document.querySelectorAll('.multiplier-row button').forEach((btn) => {
 document.getElementById('remote-bull25').addEventListener('click', () => throwDart(25, 1));
 document.getElementById('remote-bull50').addEventListener('click', () => throwDart(25, 2));
 document.getElementById('remote-miss').addEventListener('click', () => throwDart(0, 1));
-document.getElementById('remote-undo').addEventListener('click', () => { socket.emit('undo_throw'); buzz(20); });
-document.getElementById('remote-finish-practice').addEventListener('click', () => socket.emit('finish_game'));
+document.getElementById('remote-undo').addEventListener('click', () => { send('undo_throw'); buzz(20); });
+document.getElementById('remote-finish-practice').addEventListener('click', () => send('finish_game'));
 document.getElementById('remote-end-game').addEventListener('click', () => {
-  if (confirm('Spiel jetzt beenden? Der aktuelle Stand wird gewertet und gespeichert.')) { socket.emit('end_match_early'); buzz(20); }
+  if (confirm('Spiel jetzt beenden? Der aktuelle Stand wird gewertet und gespeichert.')) { send('end_match_early'); buzz(20); }
 });
 
 document.addEventListener('pointerdown', (e) => {
@@ -123,7 +145,7 @@ document.getElementById('remote-add-player').addEventListener('click', () => {
   const input = document.getElementById('remote-new-player-name');
   const name = input.value.trim();
   if (!name) return;
-  socket.emit('add_player', { name }, (res) => {
+  send('add_player', { name }, (res) => {
     if (res && res.ok) {
       setupSelectedIds.push(res.player.id);
       input.value = '';
@@ -147,9 +169,27 @@ document.querySelectorAll('#remote-setup-legs .stepper-btn').forEach((btn) => {
   });
 });
 
+const MODE_HINTS = {
+  cricket: 'Cricket: 20 bis 15 und Bull je dreimal treffen (Double = 2, Triple = 3). Weitere Treffer auf offene Zahlen geben Punkte. Ab 2 Spielern.',
+  atc: 'Rund um die Uhr: 1 bis 20 und zuletzt Bull der Reihe nach treffen. Wer zuerst fertig ist, gewinnt.',
+};
+document.querySelectorAll('#remote-setup-mode button').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    setupMode = btn.dataset.mode;
+    document.querySelectorAll('#remote-setup-mode button').forEach((b) => b.classList.toggle('active', b === btn));
+    document.getElementById('remote-x01-options').style.display = setupMode === 'x01' ? '' : 'none';
+    const hint = document.getElementById('remote-mode-hint');
+    hint.style.display = setupMode === 'x01' ? 'none' : 'block';
+    hint.textContent = MODE_HINTS[setupMode] || '';
+    buzz(6);
+  });
+});
+
 document.getElementById('remote-start-match').addEventListener('click', () => {
   if (setupSelectedIds.length === 0) { alert('Bitte mindestens einen Spieler antippen.'); return; }
-  socket.emit('start_match', {
+  if (setupMode === 'cricket' && setupSelectedIds.length < 2) { alert('Cricket braucht mindestens 2 Spieler.'); return; }
+  send('start_match', {
+    mode: setupMode,
     playerIds: setupSelectedIds,
     startScore: setupScore,
     legsToWin: setupLegs,
@@ -162,7 +202,7 @@ document.getElementById('remote-start-match').addEventListener('click', () => {
 
 document.getElementById('remote-start-practice').addEventListener('click', () => {
   if (setupSelectedIds.length === 0) { alert('Bitte einen Spieler antippen.'); return; }
-  socket.emit('start_practice', { playerId: setupSelectedIds[0] });
+  send('start_practice', { playerId: setupSelectedIds[0] });
   buzz(20);
 });
 
@@ -227,25 +267,35 @@ function render() {
 
   renderIdentityBar(g);
 
-  if (g.mode === 'x01') {
+  if (g.mode !== 'practice') {
     const player = g.players[g.activePlayerIndex];
+    const display = g.mode === 'x01' ? player.currentScore : player.displayScore;
+    const where = g.mode === 'x01' ? `Leg ${g.legNumber}` : MODE_LABELS[g.mode];
     const identityPlayer = identity ? g.players.find((p) => p.id === identity) : null;
     const isMe = !!identityPlayer && identityPlayer.id === player.id;
     const sameGame = prevSnapshot && prevSnapshot.gameId === g.id;
-    const scoreChanged = sameGame && prevSnapshot.score !== player.currentScore && prevSnapshot.playerId === player.id;
+    const scoreChanged = sameGame && prevSnapshot.score !== display && prevSnapshot.playerId === player.id;
     const dartAdded = sameGame && prevSnapshot.playerId === player.id && player.turnDarts.length > prevSnapshot.darts;
 
     document.getElementById('remote-turn-text').innerHTML = isMe
-      ? `<span class="who me">Du bist dran</span> <span class="sub">— Leg ${g.legNumber}</span>`
-      : `<span class="who">${escapeHtml(player.name)} ist dran</span> <span class="sub">— Leg ${g.legNumber}</span>`;
-    scoreEl.textContent = player.currentScore;
+      ? `<span class="who me">Du bist dran</span> <span class="sub">— ${where}</span>`
+      : `<span class="who">${escapeHtml(player.name)} ist dran</span> <span class="sub">— ${where}</span>`;
+    scoreEl.textContent = display;
+    scoreEl.classList.toggle('long', String(display).length > 3);
     scoreEl.classList.remove('score-pop');
     if (scoreChanged) { void scoreEl.offsetWidth; scoreEl.classList.add('score-pop'); }
     document.getElementById('remote-dart-slots').innerHTML = renderDartSlots(player.turnDarts, dartAdded);
-    const co = player.checkoutSuggestion;
-    document.getElementById('remote-checkout').innerHTML = co && co.possible
-      ? `<span class="co-label">CHECKOUT</span><span class="co-value">${co.route.map((r) => r.label).join(' · ')}</span>`
-      : '';
+    let infoHtml = '';
+    if (g.mode === 'x01') {
+      const co = player.checkoutSuggestion;
+      if (co && co.possible) infoHtml = `<span class="co-label">CHECKOUT</span><span class="co-value">${co.route.map((r) => r.label).join(' · ')}</span>`;
+    } else if (g.mode === 'cricket') {
+      const open = player.openNumbers.map((n) => (n === 25 ? 'B' : n)).join(' · ');
+      infoHtml = `<span class="co-label">NOCH OFFEN</span><span class="co-value">${open || 'alles zu – Punkte holen'}</span>`;
+    } else {
+      infoHtml = `<span class="co-label">${player.reached} / ${g.totalTargets} GETROFFEN</span><span class="co-value">Ziel: ${display}</span>`;
+    }
+    document.getElementById('remote-checkout').innerHTML = infoHtml;
 
     finishPractice.hidden = true;
     endGame.hidden = g.status === 'finished';
@@ -265,23 +315,23 @@ function render() {
            <button class="btn btn-ghost" id="remote-flow-undo">Falsch eingegeben? Letzten Wurf zurück</button>`;
       flow.hidden = false;
       document.getElementById('remote-flow-btn').addEventListener('click', () => {
-        socket.emit(g.status === 'finished' ? 'finish_game' : 'continue_after_leg');
+        send(g.status === 'finished' ? 'finish_game' : 'continue_after_leg');
         buzz(20);
       });
       const flowUndo = document.getElementById('remote-flow-undo');
-      if (flowUndo) flowUndo.addEventListener('click', () => { socket.emit('undo_throw'); buzz(20); });
+      if (flowUndo) flowUndo.addEventListener('click', () => { send('undo_throw'); buzz(20); });
       pad.hidden = true;
       wait.hidden = true;
     } else {
       flow.hidden = true;
       pad.hidden = false;
       const locked = !!identityPlayer && !isMe;
-      pad.classList.toggle('locked', locked);
+      pad.classList.toggle('locked', locked || !socket.connected);
       wait.hidden = !locked;
       if (locked) wait.innerHTML = `<strong>${escapeHtml(player.name)}</strong> ist dran – dein Handy wartet, bis du wieder wirfst.`;
     }
 
-    prevSnapshot = { gameId: g.id, playerId: player.id, score: player.currentScore, darts: player.turnDarts.length };
+    prevSnapshot = { gameId: g.id, playerId: player.id, score: display, darts: player.turnDarts.length };
   } else {
     const sameGame = prevSnapshot && prevSnapshot.gameId === g.id;
     const dartAdded = sameGame && g.turnDarts.length > prevSnapshot.darts;

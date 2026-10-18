@@ -8,12 +8,14 @@ const QRCode = require('qrcode');
 
 const store = require('./store');
 const { getLanIp } = require('./network');
-const { X01Match, PracticeSession, findCheckout } = require('./gameEngine');
+const { X01Match, PracticeSession, CricketMatch, AroundTheClock, findCheckout } = require('./gameEngine');
+
+const GAME_CLASSES = { x01: X01Match, cricket: CricketMatch, atc: AroundTheClock, practice: PracticeSession };
 
 function createServer() {
   const app = express();
   const server = http.createServer(app);
-  const io = new SocketIOServer(server);
+  const io = new SocketIOServer(server, { pingInterval: 4000, pingTimeout: 4000 });
 
   app.use(express.static(path.join(__dirname, '..', 'public')));
 
@@ -24,7 +26,7 @@ function createServer() {
   const savedMatch = store.loadCurrentMatch();
   if (savedMatch) {
     try {
-      currentGame = savedMatch.mode === 'practice' ? PracticeSession.fromJSON(savedMatch) : X01Match.fromJSON(savedMatch);
+      currentGame = (GAME_CLASSES[savedMatch.mode] || X01Match).fromJSON(savedMatch);
     } catch (err) {
       console.error('Konnte gespeichertes Spiel nicht wiederherstellen:', err);
       store.clearCurrentMatch();
@@ -32,7 +34,8 @@ function createServer() {
   }
 
   function persistCurrentGame() {
-    if (currentGame && currentGame.status !== 'finished') {
+    // A finished-but-not-yet-saved game is kept too, so a crash on the result screen loses nothing.
+    if (currentGame) {
       store.saveCurrentMatch(currentGame.toJSON());
     } else {
       store.clearCurrentMatch();
@@ -65,6 +68,7 @@ function createServer() {
         if (!s) continue;
         s.matchesPlayed += 1;
         if (m.winnerId === mp.id) s.matchesWon += 1;
+        if (m.mode && m.mode !== 'x01') continue; // Cricket / Rund um die Uhr have no X01 averages
         if (mp.average > s.bestAverage) s.bestAverage = mp.average;
         if (mp.highestCheckout > s.bestCheckout) s.bestCheckout = mp.highestCheckout;
         s.totalDarts += mp.dartsThrownTotal;
@@ -90,7 +94,7 @@ function createServer() {
    * (missing turnLog -> zeros) instead of needing a data migration.
    */
   function enrichMatchesWithAnalytics(matches) {
-    return matches.map((m) => ({
+    return matches.map((m) => (m.mode && m.mode !== 'x01' ? m : {
       ...m,
       players: m.players.map((p) => {
         const turnLog = p.turnLog || [];
@@ -154,18 +158,24 @@ function createServer() {
         .filter(Boolean);
       if (selected.length < 1) return;
 
-      const startScore = Number(config.startScore) || 501;
-      const legsToWin = Math.max(1, Number(config.legsToWin) || 1);
-      const setsToWin = Math.max(1, Number(config.setsToWin) || 1);
-
-      currentGame = new X01Match({
-        players: selected,
-        startScore,
-        legsToWin,
-        setsToWin,
-        doubleOut: config.doubleOut !== false,
-        doubleIn: !!config.doubleIn,
-      });
+      if (config.mode === 'cricket') {
+        if (selected.length < 2) return;
+        currentGame = new CricketMatch({ players: selected });
+      } else if (config.mode === 'atc') {
+        currentGame = new AroundTheClock({ players: selected, multiHit: !!config.multiHit });
+      } else {
+        const startScore = Number(config.startScore) || 501;
+        const legsToWin = Math.max(1, Number(config.legsToWin) || 1);
+        const setsToWin = Math.max(1, Number(config.setsToWin) || 1);
+        currentGame = new X01Match({
+          players: selected,
+          startScore,
+          legsToWin,
+          setsToWin,
+          doubleOut: config.doubleOut !== false,
+          doubleIn: !!config.doubleIn,
+        });
+      }
       broadcastState();
     });
 
@@ -206,7 +216,7 @@ function createServer() {
     });
 
     socket.on('end_match_early', () => {
-      if (currentGame && currentGame.mode === 'x01') {
+      if (currentGame && currentGame.mode !== 'practice') {
         currentGame.endEarly();
         broadcastState();
       }
@@ -214,12 +224,13 @@ function createServer() {
 
     socket.on('finish_game', () => {
       if (!currentGame) return;
-      if (currentGame.mode === 'x01') {
-        store.appendMatch(currentGame.toMatchRecord());
-      } else if (currentGame.mode === 'practice') {
+      if (currentGame.mode === 'practice') {
         currentGame.finish();
         store.appendPracticeSession(currentGame.toSessionRecord());
+      } else {
+        store.appendMatch(currentGame.toMatchRecord());
       }
+      try { store.autoBackup(); } catch (err) { console.error('Backup fehlgeschlagen:', err); }
       currentGame = null;
       store.clearCurrentMatch();
       broadcastState();
@@ -229,6 +240,10 @@ function createServer() {
       currentGame = null;
       store.clearCurrentMatch();
       broadcastState();
+    });
+
+    socket.on('get_data_info', (ack) => {
+      ack && ack(store.dataInfo());
     });
 
     socket.on('get_history', (ack) => {
@@ -286,6 +301,10 @@ function startServer(preferredPort) {
     const { server } = createServer();
     server.on('error', reject);
     server.listen(preferredPort, () => {
+      // Daily backup (also checked hourly, for apps that stay open for days)
+      const backup = () => { try { store.autoBackup(); } catch (err) { console.error('Backup fehlgeschlagen:', err); } };
+      backup();
+      setInterval(backup, 60 * 60 * 1000).unref();
       resolve({ server, port: server.address().port });
     });
   });

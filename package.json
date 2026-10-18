@@ -1,13 +1,14 @@
 {
   "name": "darttracker",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Lokale Dart-Tracking-App mit Handy-Fernbedienung",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
     "server": "node server/index.js",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "test": "node --test test/engine.test.js test/store.test.js"
   },
   "dependencies": {
     "electron-updater": "^6.8.9",

@@ -9,6 +9,7 @@ let currentView = 'home';
 // ---- Local UI-only state ----
 let setupSelectedPlayerIds = [];
 let setupStartScoreValue = 501;
+let setupMode = 'x01';
 let setupLegsValue = 3;
 let setupSetsValue = 1;
 let practiceSelectedPlayerId = null;
@@ -96,11 +97,13 @@ function renderHome() {
   const g = latestState.game;
   if (!g) { banner.hidden = true; return; }
   banner.hidden = false;
-  if (g.mode === 'x01') {
-    const names = g.players.map((p) => p.name).join(' vs ');
-    document.getElementById('resume-text').textContent = `Spiel läuft: ${names} — Leg ${g.legNumber}`;
+  const text = document.getElementById('resume-text');
+  if (g.mode === 'practice') {
+    text.textContent = `Training läuft: ${g.player.name}`;
   } else {
-    document.getElementById('resume-text').textContent = `Training läuft: ${g.player.name}`;
+    const names = g.players.map((p) => p.name).join(' vs ');
+    const mode = g.mode === 'x01' ? `Leg ${g.legNumber}` : MODE_LABELS[g.mode];
+    text.textContent = `Spiel läuft: ${names} — ${mode}`;
   }
 }
 
@@ -183,12 +186,27 @@ document.getElementById('setup-custom-score').addEventListener('input', (e) => {
   setupStartScoreValue = Number(e.target.value) || 0;
 });
 
+function applySetupMode(mode) {
+  setupMode = mode;
+  document.querySelectorAll('#setup-mode .mode-card').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+  document.getElementById('setup-x01-options').hidden = mode !== 'x01';
+  document.getElementById('setup-atc-options').hidden = mode !== 'atc';
+  document.getElementById('setup-cricket-options').hidden = mode !== 'cricket';
+}
+document.querySelectorAll('#setup-mode .mode-card').forEach((b) => b.addEventListener('click', () => applySetupMode(b.dataset.mode)));
+
 document.getElementById('setup-start-btn').addEventListener('click', () => {
   if (setupSelectedPlayerIds.length === 0) {
     alert('Bitte mindestens einen Spieler auswählen.');
     return;
   }
+  if (setupMode === 'cricket' && setupSelectedPlayerIds.length < 2) {
+    alert('Cricket braucht mindestens 2 Spieler.');
+    return;
+  }
   socket.emit('start_match', {
+    mode: setupMode,
+    multiHit: document.getElementById('setup-atc-multihit').checked,
     playerIds: setupSelectedPlayerIds,
     startScore: setupStartScoreValue || 501,
     legsToWin: setupLegsValue || 1,
@@ -344,7 +362,7 @@ function snapshotGame(g) {
     activePlayerIndex: g.activePlayerIndex,
     legNumber: g.legNumber,
     players: g.players.map((p) => ({
-      score: p.currentScore,
+      score: p.currentScore !== undefined ? p.currentScore : p.displayScore,
       darts: p.turnDarts.length,
       turns: p.turnLog.length,
       lastTurn: p.turnLog[p.turnLog.length - 1] || null,
@@ -405,7 +423,7 @@ function buildCard() {
   };
 }
 
-function renderGame() {
+function renderX01Game() {
   const g = latestState.game;
   if (!g || g.mode !== 'x01') return;
 
@@ -423,6 +441,8 @@ function renderGame() {
   const board = document.getElementById('scoreboard');
   const key = `${g.id}:${g.players.length}`;
   if (gameCardsKey !== key) {
+    board.classList.remove('cricket-wrap');
+    multiBoardKey = null;
     board.innerHTML = '';
     gameCards = g.players.map(() => buildCard());
     gameCards.forEach((c) => board.appendChild(c.el));
@@ -497,6 +517,173 @@ function renderGame() {
   if (signature !== turnLogSignature) {
     turnLogSignature = signature;
     document.getElementById('turn-log').innerHTML = buildLog(true);
+  }
+
+  handleLegAndMatchOverlays(g, prev);
+  prevGameSnapshot = snapshotGame(g);
+  cameraNotifyGame(g);
+}
+
+// ---------------------------------------------------------------------------
+// Cricket & Around the Clock rendering (X01 lives in renderX01Game above)
+// ---------------------------------------------------------------------------
+
+const MODE_LABELS = { x01: 'X01', cricket: 'Cricket', atc: 'Rund um die Uhr', practice: 'Training' };
+
+function renderGame() {
+  const g = latestState.game;
+  if (!g || g.mode === 'practice') return;
+  if (g.mode === 'x01') renderX01Game();
+  else renderMultiGame(g);
+}
+
+/** Cricket mark glyphs as inline SVG: 1 = slash, 2 = cross, 3 = cross in a circle. */
+function markSvg(n) {
+  if (!n) return '';
+  const slash = '<path d="M6 18 18 6"/>';
+  const cross = '<path d="M6 6l12 12M18 6 6 18"/>';
+  const ring = n >= 3 ? '<circle cx="12" cy="12" r="10"/>' : '';
+  return `<svg class="mk mk-${Math.min(n, 3)}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round">${n === 1 ? slash : cross}${ring}</svg>`;
+}
+
+function cricketBoardHtml(g, prevMarks) {
+  const N = g.players.length;
+  const middle = N === 2;
+  const label = (n) => (n === 25 ? 'B' : String(n));
+  const closedByAll = (n) => g.players.every((p) => p.marks[n] >= 3);
+  const cells = [];
+
+  const head = (p, idx) => `<div class="cr-head${idx === g.activePlayerIndex ? ' active' : ''}">
+      ${idx === g.activePlayerIndex && g.status === 'in_progress' ? '<span class="active-badge">AM WURF</span>' : ''}
+      <div class="cr-name">${escapeHtml(p.name)}</div>
+      <div class="cr-score">${p.score}</div>
+      <div class="cr-mpr">MPR ${p.mpr.toFixed(2)}</div>
+    </div>`;
+
+  if (middle) cells.push(head(g.players[0], 0), '<div class="cr-gap"></div>', head(g.players[1], 1));
+  else cells.push('<div class="cr-gap"></div>', ...g.players.map(head));
+
+  g.numbers.forEach((n) => {
+    const dead = closedByAll(n);
+    const markCell = (p, idx) => {
+      const pop = prevMarks && prevMarks[idx] !== undefined && p.marks[n] > prevMarks[idx][n];
+      return `<div class="cr-cell${idx === g.activePlayerIndex ? ' active-col' : ''}${dead ? ' dead' : ''}${p.marks[n] >= 3 ? ' closed' : ''}${pop ? ' pop' : ''}">${markSvg(p.marks[n])}</div>`;
+    };
+    const num = `<div class="cr-num${dead ? ' dead' : ''}">${label(n)}</div>`;
+    if (middle) cells.push(markCell(g.players[0], 0), num, markCell(g.players[1], 1));
+    else cells.push(num, ...g.players.map(markCell));
+  });
+
+  const cols = middle ? 'minmax(0,1fr) auto minmax(0,1fr)' : `auto repeat(${N}, minmax(0,1fr))`;
+  const active = g.players[g.activePlayerIndex];
+  return `<div class="cr-board" style="grid-template-columns:${cols}">${cells.join('')}</div>
+    <div class="cr-darts"><div class="dart-slots">${renderDartSlots(active.turnDarts, false)}</div></div>`;
+}
+
+function updateTurnLog(g, prev, describe) {
+  const build = (markNew) => g.players.map((p, idx) => {
+    const pp = prev ? prev.players[idx] : null;
+    return p.turnLog.slice(-6).reverse().map((t, i) => {
+      const isNew = markNew && i === 0 && !!pp && p.turnLog.length > pp.turns;
+      const dartsStr = t.darts.map((d) => d.label).join(' ');
+      return `<div class="turn-log-entry${isNew ? ' new-entry' : ''}">
+        <div><span class="who">${escapeHtml(p.name)}</span><div class="darts">${dartsStr}</div></div>
+        <div class="result">${describe(t)}</div>
+      </div>`;
+    }).join('');
+  }).join('') || '<div class="empty-state">Noch keine Würfe</div>';
+  const signature = build(false);
+  if (signature !== turnLogSignature) {
+    turnLogSignature = signature;
+    document.getElementById('turn-log').innerHTML = build(true);
+  }
+}
+
+let prevCricketMarks = null;
+let multiBoardKey = null;
+let multiBoardSignature = null;
+
+function renderMultiGame(g) {
+  const prev = prevGameSnapshot && prevGameSnapshot.id === g.id ? prevGameSnapshot : null;
+  const show = document.body.classList.contains('tv-mode');
+  const board = document.getElementById('scoreboard');
+
+  const legEl = document.getElementById('game-meta-leg');
+  const subEl = document.getElementById('game-meta-sub');
+  const subText = g.mode === 'cricket'
+    ? 'Marks schließen · Punkte sammeln'
+    : g.multiHit ? 'Double/Triple springen weiter' : 'Jede Zahl der Reihe nach';
+  if (legEl.textContent !== MODE_LABELS[g.mode]) legEl.textContent = MODE_LABELS[g.mode];
+  if (subEl.textContent !== subText) subEl.textContent = subText;
+
+  // dart that was just thrown (still in turnDarts, or last of the visit that just closed)
+  let thrown = null;
+  g.players.forEach((p, idx) => {
+    const pp = prev ? prev.players[idx] : null;
+    if (!pp) return;
+    if (p.turnDarts.length > pp.darts) thrown = p.turnDarts[p.turnDarts.length - 1];
+    else if (p.turnLog.length > pp.turns) {
+      const t = p.turnLog[p.turnLog.length - 1];
+      thrown = t.darts[t.darts.length - 1];
+    }
+  });
+  if (thrown && show) {
+    showDartFly({ ...thrown, bust: false });
+    playSound(thrown.multiplier === 3 ? 'treble' : 'dart');
+  }
+
+  if (g.mode === 'cricket') {
+    const key = `${g.id}:cricket`;
+    if (multiBoardKey !== key) { board.innerHTML = ''; board.classList.add('cricket-wrap'); multiBoardKey = key; multiBoardSignature = null; prevCricketMarks = null; }
+    const marksNow = g.players.map((p) => ({ ...p.marks }));
+    const signature = JSON.stringify([g.players.map((p) => [p.score, p.marks, p.turnDarts.map((d) => d.label)]), g.activePlayerIndex, g.status]);
+    if (signature !== multiBoardSignature) {
+      board.innerHTML = cricketBoardHtml(g, prevCricketMarks);
+      multiBoardSignature = signature;
+      // number just closed by someone → celebrate in show mode
+      if (show && prevCricketMarks) {
+        g.numbers.forEach((n) => g.players.forEach((p, idx) => {
+          if (p.marks[n] >= 3 && prevCricketMarks[idx] && prevCricketMarks[idx][n] < 3) showBigFlash(n === 25 ? 'Bull zu' : `${n} zu`, 'green', p.name);
+        }));
+      }
+      prevCricketMarks = marksNow;
+    }
+    updateTurnLog(g, prev, (t) => `${t.marks} Marks${t.points ? ` · +${t.points}` : ''}`);
+  } else {
+    board.classList.remove('cricket-wrap');
+    const key = `${g.id}:atc:${g.players.length}`;
+    if (multiBoardKey !== key) {
+      board.innerHTML = '';
+      gameCards = g.players.map(() => buildCard());
+      gameCards.forEach((c) => board.appendChild(c.el));
+      gameCardsKey = null; // force the X01 card cache to rebuild if a different game comes next
+      multiBoardKey = key;
+    }
+    g.players.forEach((p, idx) => {
+      const c = gameCards[idx];
+      const isActive = idx === g.activePlayerIndex && g.status === 'in_progress';
+      const pp = prev ? prev.players[idx] : null;
+      const targetChanged = !!pp && pp.score !== p.displayScore;
+      const becameActive = !!prev && isActive && prev.activePlayerIndex !== idx;
+      c.el.classList.toggle('active', isActive);
+      c.badge.hidden = !isActive;
+      if (becameActive) restartAnim(c.el, 'active-in', 1000);
+      setText(c, 'name', c.name, p.name);
+      setText(c, 'avg', c.avg, `${p.darts} Darts`);
+      setText(c, 'score', c.score, p.displayScore);
+      c.score.classList.toggle('long', p.displayScore.length > 2);
+      if (targetChanged) restartAnim(c.score, 'score-pop', 600);
+      c.sets.hidden = true;
+      setText(c, 'legs', c.legs, `${p.reached} / ${g.totalTargets} getroffen`);
+      const slotsChanged = setHtml(c, 'slots', c.slots, renderDartSlots(p.turnDarts, false));
+      if (slotsChanged && pp && p.turnDarts.length > pp.darts) {
+        const filled = c.slots.querySelectorAll('.dart-slot.filled');
+        if (filled.length) filled[filled.length - 1].classList.add('dart-in');
+      }
+      const pct = Math.round((p.reached / g.totalTargets) * 100);
+      setHtml(c, 'checkout', c.checkout, `<div class="atc-bar"><span style="width:${pct}%"></span></div>`);
+    });
+    updateTurnLog(g, prev, (t) => `${t.marks} ${t.marks === 1 ? 'Treffer' : 'Treffer'}`);
   }
 
   handleLegAndMatchOverlays(g, prev);
@@ -710,9 +897,11 @@ function handleLegAndMatchOverlays(g, prev) {
         : 'Unentschieden';
       document.getElementById('match-summary').innerHTML =
         (g.endedEarly ? '<div style="margin-bottom:8px;">Vorzeitig beendet – Stand wird gewertet.</div>' : '') +
-        g.players.map((p) =>
-          `${escapeHtml(p.name)}: ${p.legsWon} Legs${g.setsToWin > 1 ? `, ${p.setsWon} Sets` : ''} · Ø ${p.average.toFixed(1)} · Highscore ${p.highestTurn}${p.highestCheckout ? ` · Bestes Checkout ${p.highestCheckout}` : ''}`
-        ).join('<br/>');
+        g.players.map((p) => {
+          if (g.mode === 'cricket') return `${escapeHtml(p.name)}: ${p.score} Punkte · ${p.marksTotal} Marks · MPR ${p.mpr.toFixed(2)}`;
+          if (g.mode === 'atc') return `${escapeHtml(p.name)}: ${p.reached}/${g.totalTargets} getroffen · ${p.darts} Darts`;
+          return `${escapeHtml(p.name)}: ${p.legsWon} Legs${g.setsToWin > 1 ? `, ${p.setsWon} Sets` : ''} · Ø ${p.average.toFixed(1)} · Highscore ${p.highestTurn}${p.highestCheckout ? ` · Bestes Checkout ${p.highestCheckout}` : ''}`;
+        }).join('<br/>');
     }
   } else {
     matchOverlay.hidden = true;
@@ -796,6 +985,12 @@ let statsMatchesCache = [];
 let statsPracticeCache = [];
 
 function renderStats() {
+  socket.emit('get_data_info', (info) => {
+    const el = document.getElementById('data-info');
+    if (!info) { el.textContent = ''; return; }
+    const last = info.backups.length ? info.backups[info.backups.length - 1].replace(/^darttracker-|\.json$/g, '') : null;
+    el.innerHTML = `Automatische Tagessicherung: ${info.backups.length} Datei${info.backups.length === 1 ? '' : 'en'}${last ? `, zuletzt ${escapeHtml(last)}` : ''} · Ordner: <code>${escapeHtml(info.backupDir)}</code> · Jede Sicherung lässt sich über „Sicherung laden“ wieder einspielen.`;
+  });
   socket.emit('get_history', (res) => {
     statsMatchesCache = res.matches || [];
     statsPracticeCache = res.practiceSessions || [];
@@ -839,8 +1034,9 @@ function renderStatsAnalytics() {
 
   const x01 = computeX01Overview(statsSelectedPlayerId, statsMatchesCache);
   const practice = computePracticeOverview(statsSelectedPlayerId, statsPracticeCache);
+  const other = computeOtherModes(statsSelectedPlayerId, statsMatchesCache);
 
-  if (x01.matchesPlayed === 0 && practice.sessionsPlayed === 0) {
+  if (x01.matchesPlayed === 0 && practice.sessionsPlayed === 0 && other.cricketPlayed === 0 && other.atcPlayed === 0) {
     emptyEl.hidden = false;
     bodyEl.hidden = true;
     emptyEl.textContent = 'Noch keine gespeicherten Spiele oder Trainings für diesen Spieler.';
@@ -858,6 +1054,8 @@ function renderStatsAnalytics() {
     statTile(x01.highestTurn || '–', 'Höchste Aufnahme'),
     statTile(practice.sessionsPlayed, 'Trainingseinheiten'),
     statTile(practice.overallAverage ? practice.overallAverage.toFixed(1) : '–', 'Schnitt (Training)'),
+    ...(other.cricketPlayed ? [statTile(`${other.cricketWon}/${other.cricketPlayed}`, 'Cricket Siege'), statTile(other.bestMpr ? other.bestMpr.toFixed(2) : '–', 'Bester MPR (Cricket)')] : []),
+    ...(other.atcPlayed ? [statTile(`${other.atcWon}/${other.atcPlayed}`, 'Rund um die Uhr Siege'), statTile(other.bestClockDarts !== null ? other.bestClockDarts : '–', 'Bestes Rund um die Uhr (Darts)')] : []),
   ].join('');
 
   document.getElementById('chart-x01-trend').innerHTML = buildLineChartSVG(x01.trend, { color: 'var(--accent)' });
@@ -879,7 +1077,7 @@ function renderStatsTables() {
     const winner = m.players.find((p) => p.id === m.winnerId);
     return `<tr class="match-row" data-match="${m.id}">
       <td>${new Date(m.finishedAt).toLocaleString('de-DE')}</td>
-      <td>${m.startScore}</td>
+      <td>${m.mode === 'cricket' ? 'Cricket' : m.mode === 'atc' ? 'Rund um die Uhr' : m.startScore}</td>
       <td>${m.players.map((p) => escapeHtml(p.name)).join(' vs ')}</td>
       <td>${winner ? escapeHtml(winner.name) : '–'}</td>
     </tr>`;
@@ -917,6 +1115,18 @@ function toggleMatchDetail(row, match) {
 }
 
 function renderMatchDetail(match) {
+  if (match.mode === 'cricket' || match.mode === 'atc') {
+    const lines = match.players.map((p) => `
+      <div class="leg-history-item">
+        <span>${escapeHtml(p.name)}${p.id === match.winnerId ? ' · Sieger' : ''}</span>
+        <span>${match.mode === 'cricket'
+          ? `${p.score} Punkte · ${p.closed}/7 geschlossen · ${p.marksTotal} Marks · MPR ${(p.mpr || 0).toFixed(2)}`
+          : `${p.reached}/21 getroffen · ${p.dartsThrownTotal} Darts${p.finished ? ' · fertig' : ''}`}</span>
+      </div>`).join('');
+    return `<div class="stack"><div>
+      <strong style="font-size:0.85rem; color:var(--text-dim)">${match.mode === 'cricket' ? 'Cricket' : 'Rund um die Uhr'}${match.endedEarly ? ' · vorzeitig beendet' : ''}</strong>
+      <div class="leg-history-list" style="margin-top:6px;">${lines}</div></div></div>`;
+  }
   const legLines = (match.legHistory || []).map((l) => {
     const winner = match.players.find((p) => p.id === l.winnerId);
     return `<div class="leg-history-item"><span>Leg ${l.leg}${match.setsToWin > 1 ? ` · Set ${l.set}` : ''} — ${winner ? escapeHtml(winner.name) : '?'}</span><span>Checkout ${l.checkoutScore} (${l.checkoutDartCount} ${l.checkoutDartCount === 1 ? 'Dart' : 'Darts'})</span></div>`;
@@ -1057,7 +1267,7 @@ document.getElementById('camera-accept').addEventListener('click', () => {
 let cameraLastTurnCount = 0;
 function cameraNotifyGame(g) {
   if (!cameraDetector.running) return;
-  if (!g || g.mode !== 'x01') { cameraDetector.setPaused(true); return; }
+  if (!g || g.mode === 'practice') { cameraDetector.setPaused(true); return; }
   cameraDetector.setPaused(g.status !== 'in_progress');
   const turns = g.players.reduce((s, p) => s + p.turnLog.length, 0);
   if (turns !== cameraLastTurnCount) {
@@ -1149,6 +1359,13 @@ document.getElementById('calib-done').addEventListener('click', () => {
   saveCameraSettings({ calibration: { points: calibPoints }, position: document.getElementById('calib-position').value });
   closeCalibration();
 });
+
+// ---------------------------------------------------------------------------
+// Connection indicator
+// ---------------------------------------------------------------------------
+
+socket.on('disconnect', () => { document.getElementById('conn-banner').hidden = false; });
+socket.on('connect', () => { document.getElementById('conn-banner').hidden = true; });
 
 // ---------------------------------------------------------------------------
 // Backup: export / import all data as one JSON file

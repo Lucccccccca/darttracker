@@ -7,7 +7,7 @@
 /** Builds an X01 analytics summary for one player from (server-enriched) match records. */
 function computeX01Overview(playerId, matches) {
   const relevant = matches
-    .filter((m) => m.players.some((p) => p.id === playerId))
+    .filter((m) => (!m.mode || m.mode === 'x01') && m.players.some((p) => p.id === playerId))
     .sort((a, b) => a.finishedAt - b.finishedAt);
 
   const totals = {
@@ -49,6 +49,31 @@ function computeX01Overview(playerId, matches) {
     overallAverage: totals.totalDarts ? (totals.totalPoints / totals.totalDarts) * 3 : 0,
     checkoutRate: totals.checkoutOpportunities ? (totals.checkoutsHit / totals.checkoutOpportunities) * 100 : 0,
     trend,
+  };
+}
+
+/** Cricket and Around-the-Clock summaries for one player. */
+function computeOtherModes(playerId, matches) {
+  const mine = (mode) => matches.filter((m) => m.mode === mode && m.players.some((p) => p.id === playerId));
+  const cricket = mine('cricket');
+  let bestMpr = 0;
+  cricket.forEach((m) => {
+    const p = m.players.find((x) => x.id === playerId);
+    if (p && p.mpr > bestMpr) bestMpr = p.mpr;
+  });
+  const atc = mine('atc');
+  let bestClockDarts = null;
+  atc.forEach((m) => {
+    const p = m.players.find((x) => x.id === playerId);
+    if (p && p.finished && (bestClockDarts === null || p.dartsThrownTotal < bestClockDarts)) bestClockDarts = p.dartsThrownTotal;
+  });
+  return {
+    cricketPlayed: cricket.length,
+    cricketWon: cricket.filter((m) => m.winnerId === playerId).length,
+    bestMpr,
+    atcPlayed: atc.length,
+    atcWon: atc.filter((m) => m.winnerId === playerId).length,
+    bestClockDarts,
   };
 }
 

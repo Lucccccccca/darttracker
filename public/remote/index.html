@@ -28,6 +28,7 @@
     .turn-banner .who.me { color: var(--green); }
     .turn-banner .sub { color: var(--text-dim); font-weight: 500; }
     .remote-score { font-family: var(--font-display); text-align: center; font-size: 4.4rem; font-weight: 700; line-height: 1; margin: 6px 0; display: block; }
+    .remote-score.long { font-size: 3.2rem; }
     .remote-score.score-pop { animation: score-pop 0.55s cubic-bezier(0.2, 0.8, 0.2, 1); }
     .remote-dart-slots { display: flex; gap: 10px; justify-content: center; margin: 10px 0 14px; }
     .remote-dart-slots .dart-slot { width: 66px; height: 48px; font-size: 1.05rem; }
@@ -70,6 +71,9 @@
   </style>
 </head>
 <body>
+  <div class="conn-banner" id="conn-banner" hidden>
+    <span class="conn-dot"></span><span>Keine Verbindung zum PC – Eingabe gesperrt</span>
+  </div>
   <div class="remote-wrap">
     <div class="remote-header">DartTracker Fernbedienung</div>
 
@@ -85,7 +89,14 @@
       </div>
 
       <div class="setup-card">
-        <div class="section-label">Startpunktzahl</div>
+        <div class="section-label">Spielart</div>
+        <div class="segmented" id="remote-setup-mode">
+          <button data-mode="x01" class="active">X01</button>
+          <button data-mode="cricket">Cricket</button>
+          <button data-mode="atc">Rund um die Uhr</button>
+        </div>
+        <div id="remote-x01-options">
+        <div class="section-label" style="margin-top:16px;">Startpunktzahl</div>
         <div class="segmented" id="remote-setup-score">
           <button data-value="301">301</button>
           <button data-value="501" class="active">501</button>
@@ -103,6 +114,8 @@
           <span style="font-size:0.92rem;">Doppel-Out</span>
           <label class="switch"><input type="checkbox" id="remote-setup-double-out" checked /><span class="track"></span></label>
         </div>
+        </div>
+        <div id="remote-mode-hint" style="display:none; margin-top:14px; font-size:0.85rem; color:var(--text-dim); line-height:1.5;"></div>
       </div>
 
       <button class="btn btn-primary btn-block btn-lg" id="remote-start-match" style="margin-bottom:10px;">Spiel starten</button>

@@ -25,6 +25,8 @@ function readJson(file, fallback) {
     return JSON.parse(raw);
   } catch (err) {
     console.error(`Konnte ${file} nicht lesen, verwende Fallback.`, err);
+    // Keep the damaged file: the next save would otherwise overwrite it with an empty list.
+    try { fs.renameSync(file, `${file}.corrupt-${Date.now()}`); } catch (e) { /* ignore */ }
     return fallback;
   }
 }
@@ -93,6 +95,56 @@ function clearCurrentMatch() {
   if (fs.existsSync(CURRENT_MATCH_FILE)) fs.unlinkSync(CURRENT_MATCH_FILE);
 }
 
+// --- Automatic backups -----------------------------------------------------------
+// One file per day in the same format as the manual "Daten sichern" export, so any of them can
+// be loaded again with "Sicherung laden". The last 7 days are kept.
+
+const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+const BACKUP_RE = /^darttracker-\d{4}-\d{2}-\d{2}\.json$/;
+
+function todayStamp() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function listBackups() {
+  if (!fs.existsSync(BACKUP_DIR)) return [];
+  return fs.readdirSync(BACKUP_DIR).filter((f) => BACKUP_RE.test(f)).sort();
+}
+
+function pruneBackups(keep) {
+  const all = listBackups();
+  all.slice(0, Math.max(0, all.length - keep)).forEach((f) => {
+    try { fs.unlinkSync(path.join(BACKUP_DIR, f)); } catch (e) { /* ignore */ }
+  });
+}
+
+function autoBackup(keep = 7) {
+  const players = loadPlayers();
+  const matches = loadMatches();
+  const sessions = loadPracticeSessions();
+  const total = players.length + matches.length + sessions.length;
+  if (total === 0) return null;
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  const file = path.join(BACKUP_DIR, `darttracker-${todayStamp()}.json`);
+  if (fs.existsSync(file)) {
+    // Refresh today's backup only if it would not get smaller (a damaged data file must never
+    // replace a good backup).
+    try {
+      const old = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const oldTotal = (old.players || []).length + (old.matches || []).length + (old.practiceSessions || []).length;
+      if (oldTotal > total) { pruneBackups(keep); return file; }
+    } catch (e) { /* unreadable old backup: overwrite */ }
+  }
+  writeJson(file, { app: 'darttracker', exportedAt: Date.now(), players, matches, practiceSessions: sessions });
+  pruneBackups(keep);
+  return file;
+}
+
+function dataInfo() {
+  return { dir: DATA_DIR, backupDir: BACKUP_DIR, backups: listBackups() };
+}
+
 module.exports = {
   loadPlayers,
   savePlayers,
@@ -105,4 +157,6 @@ module.exports = {
   saveCurrentMatch,
   loadCurrentMatch,
   clearCurrentMatch,
+  autoBackup,
+  dataInfo,
 };

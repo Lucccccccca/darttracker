@@ -464,4 +464,295 @@ class PracticeSession {
   }
 }
 
-module.exports = { X01Match, PracticeSession, findCheckout, DART_CATALOGUE };
+// ---------------------------------------------------------------------------
+// Shared bits for the multi-player modes below (Cricket, Around the Clock)
+// ---------------------------------------------------------------------------
+
+/**
+ * Base for games whose state is plain data: every mutation first snapshots the whole state,
+ * so "undo" can take back anything (a dart, a visit change, even the winning dart).
+ */
+class ReversibleGame {
+  _pushHistory() {
+    const { _history, ...state } = this;
+    this._history.push(JSON.parse(JSON.stringify(state)));
+    if (this._history.length > 300) this._history.shift();
+  }
+
+  get canUndo() {
+    return this._history.length > 0;
+  }
+
+  undoThrow() {
+    const snapshot = this._history.pop();
+    if (!snapshot) return;
+    Object.assign(this, snapshot);
+  }
+
+  get activePlayer() {
+    return this.players[this.activePlayerIndex];
+  }
+
+  _closeVisit(player) {
+    player.dartsThrownTotal += player.turnDarts.length;
+    player.turnLog.push({
+      darts: player.turnDarts.slice(),
+      marks: player.turnDarts.reduce((s, d) => s + (d.marks || 0), 0),
+      points: player.turnDarts.reduce((s, d) => s + (d.points || 0), 0),
+    });
+    player.turnDarts = [];
+  }
+
+  _endTurn(player) {
+    this._closeVisit(player);
+    this.activePlayerIndex = (this.activePlayerIndex + 1) % this.players.length;
+  }
+
+  /** Ends the game now; best score wins, a tie is a draw (no winner). Subclasses provide _rank(). */
+  endEarly() {
+    if (this.status === 'finished') return;
+    this._pushHistory();
+    const ranked = this.players.slice().sort((a, b) => this._rank(b) - this._rank(a));
+    const tied = ranked.length > 1 && this._rank(ranked[0]) === this._rank(ranked[1]);
+    this.winnerId = tied ? null : ranked[0].id;
+    this.endedEarly = true;
+    this.status = 'finished';
+  }
+
+  _serialiseBase() {
+    return {
+      id: this.id,
+      mode: this.mode,
+      startedAt: this.startedAt,
+      activePlayerIndex: this.activePlayerIndex,
+      status: this.status,
+      winnerId: this.winnerId,
+      endedEarly: this.endedEarly,
+      canUndo: this.canUndo,
+    };
+  }
+
+  static _restore(instance, data, derivedKeys) {
+    const { canUndo, ...fields } = data;
+    Object.assign(instance, fields);
+    instance.players = data.players.map((p) => {
+      const copy = { ...p };
+      derivedKeys.forEach((k) => delete copy[k]);
+      return copy;
+    });
+    instance.endedEarly = !!data.endedEarly;
+    instance._history = [];
+    return instance;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cricket: close 20-15 and the bull with 3 marks each; extra marks on a number the opponents
+// haven't closed score points. First to close everything with at least the top score wins.
+// ---------------------------------------------------------------------------
+
+const CRICKET_NUMBERS = [20, 19, 18, 17, 16, 15, 25];
+
+class CricketMatch extends ReversibleGame {
+  constructor({ players }) {
+    super();
+    this.id = nextId('cricket');
+    this.mode = 'cricket';
+    this.startedAt = Date.now();
+    this.players = players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      score: 0,
+      marks: Object.fromEntries(CRICKET_NUMBERS.map((n) => [n, 0])),
+      turnDarts: [],
+      turnLog: [],
+      dartsThrownTotal: 0,
+      marksTotal: 0,
+    }));
+    this.activePlayerIndex = 0;
+    this.status = 'in_progress';
+    this.winnerId = null;
+    this.endedEarly = false;
+    this._history = [];
+  }
+
+  _allClosed(player) {
+    return CRICKET_NUMBERS.every((n) => player.marks[n] >= 3);
+  }
+
+  throwDart(value, multiplier) {
+    if (this.status !== 'in_progress') return;
+    const player = this.activePlayer;
+    if (player.turnDarts.length >= 3) return;
+    this._pushHistory();
+
+    let marksThrown = 0;
+    let points = 0;
+    if (CRICKET_NUMBERS.includes(value)) {
+      marksThrown = value === 25 ? Math.min(multiplier, 2) : multiplier;
+      const have = player.marks[value];
+      const closing = Math.min(marksThrown, Math.max(0, 3 - have));
+      const extra = marksThrown - closing;
+      player.marks[value] = have + closing;
+      const opponentOpen = this.players.some((o) => o !== player && o.marks[value] < 3);
+      if (extra > 0 && opponentOpen) {
+        points = extra * value;
+        player.score += points;
+      }
+    }
+    player.marksTotal += marksThrown;
+    player.turnDarts.push({ label: formatDartLabel(value, multiplier), value, multiplier, marks: marksThrown, points });
+
+    const topOpponent = Math.max(...this.players.filter((o) => o !== player).map((o) => o.score), -Infinity);
+    if (this._allClosed(player) && player.score >= topOpponent) {
+      this._closeVisit(player);
+      this.winnerId = player.id;
+      this.status = 'finished';
+      return;
+    }
+    if (player.turnDarts.length === 3) this._endTurn(player);
+  }
+
+  _rank(p) {
+    return p.score;
+  }
+
+  _mpr(p) {
+    return p.turnLog.length ? p.turnLog.reduce((s, t) => s + t.marks, 0) / p.turnLog.length : 0;
+  }
+
+  toJSON() {
+    return {
+      ...this._serialiseBase(),
+      numbers: CRICKET_NUMBERS,
+      players: this.players.map((p) => ({
+        ...p,
+        displayScore: String(p.score),
+        rounds: p.turnLog.length,
+        mpr: this._mpr(p),
+        openNumbers: CRICKET_NUMBERS.filter((n) => p.marks[n] < 3),
+      })),
+    };
+  }
+
+  static fromJSON(data) {
+    return ReversibleGame._restore(Object.create(CricketMatch.prototype), data, ['displayScore', 'rounds', 'mpr', 'openNumbers']);
+  }
+
+  toMatchRecord() {
+    return {
+      id: this.id,
+      mode: 'cricket',
+      startedAt: this.startedAt,
+      finishedAt: Date.now(),
+      winnerId: this.winnerId,
+      endedEarly: this.endedEarly,
+      players: this.players.map((p) => ({
+        id: p.id,
+        name: p.name,
+        score: p.score,
+        marksTotal: p.marksTotal,
+        rounds: p.turnLog.length,
+        mpr: this._mpr(p),
+        dartsThrownTotal: p.dartsThrownTotal,
+        closed: CRICKET_NUMBERS.filter((n) => p.marks[n] >= 3).length,
+      })),
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Around the Clock: hit 1, 2, … 20 and finally the bull, in order. First to finish wins.
+// ---------------------------------------------------------------------------
+
+const CLOCK_TARGETS = [...Array.from({ length: 20 }, (_, i) => i + 1), 25];
+
+class AroundTheClock extends ReversibleGame {
+  constructor({ players, multiHit = false }) {
+    super();
+    this.id = nextId('clock');
+    this.mode = 'atc';
+    this.startedAt = Date.now();
+    this.multiHit = !!multiHit; // double/treble of the target jump 2/3 numbers ahead
+    this.players = players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      reached: 0, // how many targets are done (0..21)
+      turnDarts: [],
+      turnLog: [],
+      dartsThrownTotal: 0,
+    }));
+    this.activePlayerIndex = 0;
+    this.status = 'in_progress';
+    this.winnerId = null;
+    this.endedEarly = false;
+    this._history = [];
+  }
+
+  throwDart(value, multiplier) {
+    if (this.status !== 'in_progress') return;
+    const player = this.activePlayer;
+    if (player.turnDarts.length >= 3) return;
+    this._pushHistory();
+
+    const target = CLOCK_TARGETS[player.reached];
+    let steps = 0;
+    if (value === target) steps = this.multiHit && target !== 25 ? multiplier : 1;
+    player.reached = Math.min(CLOCK_TARGETS.length, player.reached + steps);
+    player.turnDarts.push({ label: formatDartLabel(value, multiplier), value, multiplier, hit: steps > 0, marks: steps, points: 0 });
+
+    if (player.reached >= CLOCK_TARGETS.length) {
+      this._closeVisit(player);
+      this.winnerId = player.id;
+      this.status = 'finished';
+      return;
+    }
+    if (player.turnDarts.length === 3) this._endTurn(player);
+  }
+
+  _rank(p) {
+    return p.reached;
+  }
+
+  static targetLabel(index) {
+    return index >= CLOCK_TARGETS.length ? '✓' : CLOCK_TARGETS[index] === 25 ? 'Bull' : String(CLOCK_TARGETS[index]);
+  }
+
+  toJSON() {
+    return {
+      ...this._serialiseBase(),
+      multiHit: this.multiHit,
+      totalTargets: CLOCK_TARGETS.length,
+      players: this.players.map((p) => ({
+        ...p,
+        displayScore: AroundTheClock.targetLabel(p.reached),
+        darts: p.dartsThrownTotal + p.turnDarts.length,
+      })),
+    };
+  }
+
+  static fromJSON(data) {
+    return ReversibleGame._restore(Object.create(AroundTheClock.prototype), data, ['displayScore', 'darts']);
+  }
+
+  toMatchRecord() {
+    return {
+      id: this.id,
+      mode: 'atc',
+      startedAt: this.startedAt,
+      finishedAt: Date.now(),
+      winnerId: this.winnerId,
+      endedEarly: this.endedEarly,
+      multiHit: this.multiHit,
+      players: this.players.map((p) => ({
+        id: p.id,
+        name: p.name,
+        reached: p.reached,
+        finished: p.reached >= CLOCK_TARGETS.length,
+        dartsThrownTotal: p.dartsThrownTotal,
+      })),
+    };
+  }
+}
+
+module.exports = { X01Match, PracticeSession, CricketMatch, AroundTheClock, CRICKET_NUMBERS, CLOCK_TARGETS, findCheckout, DART_CATALOGUE };
