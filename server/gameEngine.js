@@ -158,6 +158,8 @@ class X01Match {
 
     if (bust) {
       player.turnDarts.push({ label, value, multiplier, points: scoreDelta, bust: true });
+      // A bust voids the whole visit, not just the busting dart.
+      player.currentScore = player.turnStartScore;
       this._endTurn(player, { bust: true });
       return;
     }
