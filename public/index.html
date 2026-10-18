@@ -192,6 +192,35 @@
           <div class="segmented input-mode-toggle" id="game-input-mode">
             <button data-mode="numpad" class="active">Zahlenfeld</button>
             <button data-mode="board">Dartscheibe</button>
+            <button data-mode="camera">Kamera</button>
+          </div>
+
+          <div id="game-input-camera" hidden>
+            <div class="camera-layout">
+              <div class="camera-preview">
+                <video id="camera-video" autoplay muted playsinline></video>
+                <canvas id="camera-overlay"></canvas>
+                <div class="camera-status" id="camera-status">Kamera aus</div>
+              </div>
+              <div class="stack" style="gap:10px;">
+                <button class="btn btn-primary" id="camera-start">Kamera starten</button>
+                <button class="btn" id="camera-calibrate">Scheibe einrichten…</button>
+                <button class="btn" id="camera-mark-empty" title="Jetzt sind keine Darts in der Scheibe">Scheibe ist leer</button>
+                <label style="margin:6px 0 0;">Empfindlichkeit <span id="camera-sens-label">5</span></label>
+                <input type="range" id="camera-sens" min="1" max="10" value="5" />
+                <div class="toggle-row" style="padding:8px 0;">
+                  <span style="font-size:0.85rem;">Automatisch eintragen</span>
+                  <label class="switch"><input type="checkbox" id="camera-auto" checked /><span class="track"></span></label>
+                </div>
+                <div id="camera-last" class="camera-last" hidden>
+                  <span>Erkannt: <strong id="camera-last-label"></strong></span>
+                  <button class="btn btn-primary" id="camera-accept">Übernehmen</button>
+                </div>
+                <div style="font-size:0.78rem; color:var(--text-dim); line-height:1.5;">
+                  Ablauf: Kamera starten → einmalig „Scheibe einrichten“ → bei leerer Scheibe „Scheibe ist leer“ drücken → werfen. Nach jeder Aufnahme Darts ziehen; die App wartet solange.
+                </div>
+              </div>
+            </div>
           </div>
 
           <div id="game-input-numpad">
@@ -414,6 +443,36 @@
     </div>
   </div>
 
+  <div class="overlay" id="overlay-calibrate" hidden>
+    <div class="overlay-card calib-card">
+      <h2 style="text-transform:none; letter-spacing:normal;">Scheibe einrichten</h2>
+      <div class="row" style="justify-content:center; gap:10px; margin:10px 0 12px;">
+        <select id="calib-device" class="btn" style="max-width:280px;"></select>
+        <select id="calib-position" class="btn">
+          <option value="oben">Kamera hängt oben / an der Decke</option>
+          <option value="unten">Kamera steht unten</option>
+          <option value="links">Kamera links neben der Scheibe</option>
+          <option value="rechts">Kamera rechts neben der Scheibe</option>
+        </select>
+      </div>
+      <div class="calib-stage" id="calib-stage">
+        <video id="calib-video" autoplay muted playsinline></video>
+        <canvas id="calib-canvas"></canvas>
+      </div>
+      <p id="calib-instruction" style="margin:12px 0 6px; font-size:1rem;"></p>
+      <p style="color:var(--text-dim); font-size:0.85rem; margin:0 0 14px;">Zum Zielen ins Bild zoomen? Einfach genau hinklicken – ein Klick pro Punkt. Danach erscheint das Gitter über der Scheibe; passt es, auf Fertig.</p>
+      <div class="row" style="justify-content:center; gap:10px;">
+        <button class="btn" id="calib-reset">Punkte zurücksetzen</button>
+        <button class="btn btn-ghost" id="calib-cancel">Abbrechen</button>
+        <button class="btn btn-primary" id="calib-done" disabled>Fertig</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="camera-pill" id="camera-pill" hidden>
+    <span class="dot"></span><span id="camera-pill-text">Kamera</span>
+  </div>
+
   <div class="show-bar" id="show-bar" hidden>
     <button class="btn btn-ghost" id="btn-sound" title="Sound an/aus">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
@@ -429,6 +488,7 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/js/dartboard.js"></script>
+  <script src="/js/camera.js"></script>
   <script src="/js/analytics.js"></script>
   <script src="/js/app.js"></script>
 </body>

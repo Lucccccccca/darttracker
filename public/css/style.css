@@ -601,6 +601,32 @@ body.tv-mode .overlay-card .btn-lg { font-size: clamp(1rem, 1.6vw, 2rem); paddin
 }
 .big-flash.orange { color: #ff8a3d; }
 .big-flash.white { color: var(--text); }
+
+/* ---- Camera detection ---- */
+.camera-layout { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(220px, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 800px) { .camera-layout { grid-template-columns: 1fr; } }
+.camera-preview { position: relative; background: #000; border-radius: var(--radius-sm); overflow: hidden; aspect-ratio: 4 / 3; border: 1px solid var(--border); }
+.camera-preview video, .camera-preview canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+.camera-status {
+  position: absolute; left: 10px; bottom: 10px; background: rgba(0, 0, 0, 0.65); color: var(--text);
+  font-size: 0.82rem; font-weight: 700; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border);
+}
+.camera-last { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--gold-dim); border: 1px solid #6b5220; border-radius: var(--radius-sm); padding: 10px 12px; font-size: 0.9rem; }
+.camera-last strong { font-family: var(--font-display); color: var(--gold); font-size: 1.2rem; }
+input[type="range"] { width: 100%; accent-color: var(--accent); }
+.calib-card { max-width: min(96vw, 1100px); width: 100%; }
+.calib-stage { position: relative; background: #000; border-radius: var(--radius-sm); overflow: hidden; aspect-ratio: 4 / 3; max-height: 62vh; margin: 0 auto; border: 1px solid var(--border); cursor: crosshair; }
+.calib-stage video, .calib-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+select.btn { appearance: auto; font-weight: 600; }
+.camera-pill {
+  position: fixed; left: 18px; bottom: 16px; z-index: 65; display: flex; align-items: center; gap: 8px;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 999px; padding: 8px 14px;
+  font-size: 0.85rem; font-weight: 600; color: var(--text-dim);
+}
+.camera-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px rgba(47, 174, 107, 0.25); }
+.camera-pill.busy .dot { background: var(--gold); box-shadow: 0 0 0 3px rgba(255, 176, 32, 0.25); }
+.camera-pill.detected { color: var(--text); border-color: var(--gold); }
+body.tv-mode .camera-pill { font-size: clamp(0.85rem, 1.2vw, 1.4rem); padding: 0.6vw 1.2vw; }
 body.tv-mode .status-bar { margin-bottom: 2vw !important; }
 body.tv-mode .status-bar .leg-badge { font-size: clamp(0.95rem, 1.7vw, 2rem); padding: 0.6vw 1.2vw; }
 body.tv-mode .status-bar .status-meta { font-size: clamp(0.9rem, 1.4vw, 1.6rem); }

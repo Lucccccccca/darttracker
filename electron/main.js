@@ -1,7 +1,7 @@
 'use strict';
 
 const path = require('path');
-const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, session } = require('electron');
 const { autoUpdater } = require('electron-updater');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4848;
@@ -30,6 +30,10 @@ if (!gotLock) {
   });
 
   async function createWindow() {
+    // The scoreboard page asks for the webcam (dart detection); it is our own page, so allow it.
+    session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+      callback(permission === 'media' || permission === 'fullscreen');
+    });
     let port;
     try {
       ({ port } = await startServer(PORT));
